@@ -7,6 +7,9 @@ import AppLayout from "./components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Credits from "./pages/Credits";
 import CreateCredit from "./pages/CreateCredit";
+import Payments from "./pages/Payments";
+import Banks from "./pages/Banks";
+import Reports from "./pages/Reports";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -23,6 +26,9 @@ const App = () => (
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/credits" element={<Credits />} />
             <Route path="/credits/new" element={<CreateCredit />} />
+            <Route path="/payments" element={<Payments />} />
+            <Route path="/banks" element={<Banks />} />
+            <Route path="/reports" element={<Reports />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

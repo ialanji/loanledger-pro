@@ -41,7 +41,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
       {/* Sidebar */}
       <div className={cn(
-        "fixed inset-y-0 left-0 z-50 w-64 bg-card transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0",
+        "fixed inset-y-0 left-0 z-50 w-72 bg-card border-r border-border/50 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0 lg:flex-shrink-0",
         sidebarOpen ? "translate-x-0" : "-translate-x-full"
       )}>
         <div className="flex flex-col h-full">
@@ -108,7 +108,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
       </div>
 
       {/* Main content */}
-      <div className="lg:pl-64">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
         <header className="h-16 bg-card border-b border-border/50 flex items-center justify-between px-6">
           <Button

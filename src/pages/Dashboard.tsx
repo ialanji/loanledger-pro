@@ -12,18 +12,19 @@ import {
 import StatCard from '@/components/dashboard/StatCard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import { DashboardStats, Payment, Credit } from '@/types/credit';
 
 // Mock data - в реальном приложении это будет загружаться из API
 const mockStats: DashboardStats = {
-  totalCredits: 156,
-  activeCredits: 142,
-  totalPrincipal: 45750000,
-  remainingPrincipal: 32180000,
-  projectedInterest: 8950000,
-  thisMonthDue: 2650000,
-  overdueAmount: 450000,
-  totalPaid: 13570000
+  totalCredits: 1,
+  activeCredits: 1,
+  totalPrincipal: 10000000,
+  remainingPrincipal: 10000000,
+  projectedInterest: 1816356.3,
+  thisMonthDue: 364163.47,
+  overdueAmount: 0,
+  totalPaid: 0
 };
 
 const mockUpcomingPayments = [
@@ -97,164 +98,196 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Дашборд</h1>
-          <p className="text-muted-foreground mt-1">
-            Обзор финансового портфеля на {formatDate(new Date())}
-          </p>
-        </div>
-        <div className="flex gap-3">
-          <Button variant="outline">
-            <Activity className="w-4 h-4 mr-2" />
-            Экспорт отчёта
-          </Button>
-          <Button className="btn-corporate" onClick={() => navigate('/credits/new')}>
-            <CreditCard className="w-4 h-4 mr-2" />
-            Новый кредит
-          </Button>
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard
-          title="Всего кредитов"
-          value={mockStats.totalCredits}
-          subtitle={`${mockStats.activeCredits} активных`}
-          icon={CreditCard}
-          variant="primary"
-          trend={{ value: 12, isPositive: true }}
-        />
-        
-        <StatCard
-          title="Остаток основного долга"
-          value={formatCurrency(mockStats.remainingPrincipal)}
-          subtitle="70% от общей суммы"
-          icon={PiggyBank}
-          variant="default"
-        />
-        
-        <StatCard
-          title="К доплате в этом месяце"
-          value={formatCurrency(mockStats.thisMonthDue)}
-          subtitle="42 платежа"
-          icon={Calendar}
-          variant="success"
-          trend={{ value: 8, isPositive: false }}
-        />
-        
-        <StatCard
-          title="Просроченные платежи"
-          value={formatCurrency(mockStats.overdueAmount)}
-          subtitle="3 кредита"
-          icon={AlertTriangle}
-          variant="danger"
-          trend={{ value: 15, isPositive: false }}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Upcoming Payments */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="w-5 h-5" />
-              Ближайшие платежи
-            </CardTitle>
-            <CardDescription>
-              Платежи на следующие 7 дней
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {mockUpcomingPayments.map((payment) => (
-                <div key={payment.id} className="flex items-center justify-between p-4 rounded-lg border border-border/50 hover:bg-muted/30 transition-colors">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-1">
-                      <span className="font-medium text-sm">{payment.contractNumber}</span>
-                      <span className={getStatusBadge(payment.status)}>
-                        {payment.status === 'overdue' ? 'Просрочен' : 'Ожидается'}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{payment.clientName}</p>
-                    <p className="text-xs text-muted-foreground">{payment.type}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="financial-amount text-sm font-semibold">
-                      {formatCurrency(payment.amount)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatDate(payment.dueDate)}
-                    </p>
-                  </div>
-                </div>
-              ))}
+      {/* Общая информация по кредитам */}
+      <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+            <DollarSign className="w-5 h-5" />
+            Общая информация по кредитам
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Общая сумма кредита */}
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                ОБЩАЯ СУММА КРЕДИТА
+              </p>
+              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
+                {formatCurrency(mockStats.totalPrincipal).replace('MDL', '₽')}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {mockStats.totalCredits} кредит в {mockStats.activeCredits} банках
+              </p>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Quick Actions & Summary */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="w-5 h-5" />
-                Прогноз доходности
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Этот месяц</span>
-                  <span className="financial-amount positive text-sm font-semibold">
-                    {formatCurrency(890000)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Следующий месяц</span>
-                  <span className="financial-amount positive text-sm font-semibold">
-                    {formatCurrency(945000)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Годовой прогноз</span>
-                  <span className="financial-amount positive text-sm font-semibold">
-                    {formatCurrency(mockStats.projectedInterest)}
-                  </span>
-                </div>
-                <div className="pt-3 border-t border-border/50">
-                  <div className="bg-success/10 rounded-lg p-3">
-                    <p className="text-xs text-success-foreground/80 mb-1">Средняя доходность</p>
-                    <p className="text-lg font-bold text-success">12.4%</p>
-                  </div>
+            {/* Остаток долга */}
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                ОСТАТОК ДОЛГА
+              </p>
+              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
+                {formatCurrency(mockStats.remainingPrincipal).replace('MDL', '₽')}
+              </p>
+              <p className="text-xs text-blue-500">
+                ✓ 100.0% от общей суммы
+              </p>
+            </div>
+
+            {/* Прогресс погашения */}
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                ПРОГРЕСС ПОГАШЕНИЯ
+              </p>
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-2xl font-bold text-green-500">0.0%</span>
+              </div>
+              <p className="text-xs text-muted-foreground mb-3">
+                Выплачено основного долга
+              </p>
+              <Progress value={0} className="h-2" />
+            </div>
+
+            {/* Структура остатка - Donut Chart */}
+            <div className="flex flex-col items-center">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-4 self-start">
+                СТРУКТУРА ОСТАТКА
+              </p>
+              <div className="relative w-32 h-32">
+                <svg className="w-32 h-32 transform -rotate-90" viewBox="0 0 100 100">
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="40"
+                    stroke="currentColor"
+                    strokeWidth="8"
+                    fill="none"
+                    className="text-blue-500"
+                  />
+                  <circle
+                    cx="50"
+                    cy="50"
+                    r="40"
+                    stroke="currentColor"
+                    strokeWidth="8"
+                    fill="none"
+                    strokeDasharray="5 246"
+                    className="text-orange-500"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-lg font-bold">0.00 ₽</span>
+                  <span className="text-xs text-muted-foreground">общий остаток</span>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+              <div className="mt-4 space-y-1 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                  <span>Основной долг</span>
+                  <span className="ml-auto font-medium">
+                    {formatCurrency(mockStats.remainingPrincipal).replace('MDL', '₽')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-orange-500"></div>
+                  <span>Проценты</span>
+                  <span className="ml-auto font-medium">
+                    {formatCurrency(mockStats.projectedInterest).replace('MDL', '₽')}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Быстрые действия</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <Button className="w-full justify-start" variant="outline">
-                <CreditCard className="w-4 h-4 mr-2" />
-                Создать новый кредит
-              </Button>
-              <Button className="w-full justify-start" variant="outline">
-                <DollarSign className="w-4 h-4 mr-2" />
-                Отметить платёж
-              </Button>
-              <Button className="w-full justify-start" variant="outline">
-                <AlertTriangle className="w-4 h-4 mr-2" />
-                Просроченные платежи
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      {/* Платеж в текущем месяце */}
+      <Card className="bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/20 dark:to-red-950/20 border-orange-200 dark:border-orange-800">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-300">
+            <Calendar className="w-5 h-5" />
+            Платеж в текущем месяце
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Платеж в текущем месяце */}
+            <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                ПЛАТЕЖ В ТЕКУЩЕМ МЕСЯЦЕ
+              </p>
+              <p className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-4">
+                {formatCurrency(mockStats.thisMonthDue).replace('MDL', '₽')}
+              </p>
+              <div className="space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span>Плановый:</span>
+                  <span className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium">
+                    {formatCurrency(mockStats.thisMonthDue).replace('MDL', '₽')}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Фактический:</span>
+                  <span className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium">
+                    {formatCurrency(mockStats.thisMonthDue).replace('MDL', '₽')}
+                  </span>
+                </div>
+                <div className="text-center pt-2">
+                  <span className="text-sm font-medium">Ожидается</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Платеж основного долга */}
+            <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                ПЛАТЕЖ ОСНОВНОГО ДОЛГА
+              </p>
+              <p className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-4">
+                333 333,33 ₽
+              </p>
+              <div className="space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span>Остаток долга:</span>
+                  <span className="font-medium text-blue-600">
+                    {formatCurrency(mockStats.remainingPrincipal).replace('MDL', '₽')}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Доля в платеже:</span>
+                  <span className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium">
+                    91.5%
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Платеж процентов */}
+            <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                ПЛАТЕЖ ПРОЦЕНТОВ
+              </p>
+              <p className="text-3xl font-bold text-red-500 mb-4">
+                30 830,14 ₽
+              </p>
+              <div className="space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span>К доплате:</span>
+                  <span className="font-medium text-red-500">
+                    {formatCurrency(mockStats.projectedInterest).replace('MDL', '₽')}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Доля в платеже:</span>
+                  <span className="bg-red-500 text-white px-2 py-1 rounded text-xs font-medium">
+                    8.5%
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

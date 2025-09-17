@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
-  BarChart3, 
   CreditCard, 
   DollarSign, 
   Building2, 
-  FileText, 
+  ShoppingCart,
+  Wallet,
+  Receipt,
   Menu,
   X,
   Calculator,
-  TrendingUp
+  TrendingUp,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -18,16 +21,21 @@ interface AppLayoutProps {
   children: React.ReactNode;
 }
 
-const navigation = [
-  { name: 'Дашборд', href: '/dashboard', icon: BarChart3 },
+const bankNavigation = [
   { name: 'Кредиты', href: '/credits', icon: CreditCard },
-  { name: 'Платежи', href: '/payments', icon: DollarSign },
-  { name: 'Банки', href: '/banks', icon: Building2 },
-  { name: 'Отчеты', href: '/reports', icon: FileText },
+  { name: 'Платежи по кредитам', href: '/payments', icon: DollarSign },
+  { name: 'Список банков', href: '/banks', icon: Building2 },
+];
+
+const navigation = [
+  { name: 'Продажи', href: '/sales', icon: ShoppingCart },
+  { name: 'Касса', href: '/cash-desk', icon: Wallet },
+  { name: 'Затраты', href: '/expenses', icon: Receipt },
 ];
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [bankSectionOpen, setBankSectionOpen] = useState(true);
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -68,21 +76,62 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
           {/* Navigation */}
           <nav className="flex-1 px-4 py-6 space-y-2">
-            {navigation.map((item) => (
-              <NavLink
-                key={item.name}
-                to={item.href}
-                className={({ isActive }) =>
-                  cn(
-                    "sidebar-nav-item",
-                    isActive && "active"
-                  )
-                }
+            {/* Bank Section */}
+            <div className="space-y-1">
+              <button
+                onClick={() => setBankSectionOpen(!bankSectionOpen)}
+                className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
               >
-                <item.icon className="w-4 h-4" />
-                <span>{item.name}</span>
-              </NavLink>
-            ))}
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4" />
+                  <span>БАНК</span>
+                </div>
+                {bankSectionOpen ? (
+                  <ChevronDown className="w-4 h-4" />
+                ) : (
+                  <ChevronRight className="w-4 h-4" />
+                )}
+              </button>
+              
+              {bankSectionOpen && (
+                <div className="ml-4 space-y-1">
+                  {bankNavigation.map((item) => (
+                    <NavLink
+                      key={item.name}
+                      to={item.href}
+                      className={({ isActive }) =>
+                        cn(
+                          "sidebar-nav-item text-sm",
+                          isActive && "active"
+                        )
+                      }
+                    >
+                      <item.icon className="w-3 h-3" />
+                      <span>{item.name}</span>
+                    </NavLink>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Main Navigation */}
+            <div className="pt-4 space-y-1">
+              {navigation.map((item) => (
+                <NavLink
+                  key={item.name}
+                  to={item.href}
+                  className={({ isActive }) =>
+                    cn(
+                      "sidebar-nav-item",
+                      isActive && "active"
+                    )
+                  }
+                >
+                  <item.icon className="w-4 h-4" />
+                  <span>{item.name}</span>
+                </NavLink>
+              ))}
+            </div>
           </nav>
 
           {/* Stats summary */}

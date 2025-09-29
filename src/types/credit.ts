@@ -12,6 +12,7 @@ export enum CreditStatus {
 }
 
 export enum PaymentStatus {
+  SCHEDULED = 'scheduled',
   PENDING = 'pending',
   PAID = 'paid',
   PARTIAL = 'partial',
@@ -99,4 +100,28 @@ export interface ScheduleItem {
   interestDue: number;
   totalDue: number;
   remainingBalance: number;
+}
+
+// Расширенный элемент графика для API с процентной ставкой
+export interface ScheduleItemWithRate extends ScheduleItem {
+  averageRate: number; // Средневзвешенная процентная ставка за период
+}
+
+// Итоговые показатели для графика платежей
+export interface ScheduleTotals {
+  totalPayments: number;    // Общая сумма платежей
+  totalInterest: number;    // Общие проценты
+  overpayment: number;      // Переплата (totalPayments - principal)
+}
+
+// Ответ API для получения графика платежей
+export interface PaymentScheduleResponse {
+  loan: {
+    id: string;
+    number: string;
+    principal: number;
+    calculationMethod: string;
+  };
+  schedule: ScheduleItemWithRate[];
+  totals: ScheduleTotals;
 }

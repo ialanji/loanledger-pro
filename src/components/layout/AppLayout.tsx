@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { 
   CreditCard, 
   DollarSign, 
@@ -12,10 +12,13 @@ import {
   Calculator,
   TrendingUp,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Tag,
+  FileBarChart
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useImportSLO } from '@/hooks/useImportSLO';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -31,11 +34,54 @@ const navigation = [
   { name: 'Продажи', href: '/sales', icon: ShoppingCart },
   { name: 'Касса', href: '/cash-desk', icon: Wallet },
   { name: 'Затраты', href: '/expenses', icon: Receipt },
+  { name: 'Алиасы', href: '/aliases', icon: Tag },
+  { name: 'Отчеты', href: '/reports', icon: FileBarChart },
 ];
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bankSectionOpen, setBankSectionOpen] = useState(true);
+  const navigate = useNavigate();
+  const slo = useImportSLO();
+
+  const statusToClasses = (status: ReturnType<typeof useImportSLO>['overallStatus']) => {
+    switch (status) {
+      case 'ok':
+        return 'bg-green-500/15 text-green-600';
+      case 'warn':
+        return 'bg-yellow-500/15 text-yellow-700';
+      case 'error':
+        return 'bg-red-500/15 text-red-600';
+      default:
+        return 'bg-muted text-muted-foreground';
+    }
+  };
+
+  const statusLabel = (status: ReturnType<typeof useImportSLO>['overallStatus']) => {
+    switch (status) {
+      case 'ok':
+        return 'в норме';
+      case 'warn':
+        return 'задержка';
+      case 'error':
+        return 'ошибка';
+      default:
+        return 'не настроен';
+    }
+  };
+
+  const tooltipText = (() => {
+    if (slo.notConfigured) return 'Импорт не настроен';
+    const lines: string[] = [];
+    for (const [source, item] of Object.entries(slo.perSource)) {
+      const name = source === 'salariul' ? 'Salariul' : source === 'cheltueli' ? 'Cheltueli' : 'Rechizite';
+      const st = statusLabel(item.status);
+      const age = item.latencyMinutes != null ? `${item.latencyMinutes} мин назад` : '—';
+      const err = item.errorMessage ? `; ошибка: ${item.errorMessage}` : '';
+      lines.push(`${name}: ${st} (успех: ${age}${err})`);
+    }
+    return lines.join('\n');
+  })();
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -55,7 +101,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
         <div className="flex flex-col h-full">
           {/* Logo */}
           <div className="flex items-center justify-between h-16 px-6 border-b border-border/50">
-            <div className="flex items-center gap-3">
+            <div 
+              className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+              onClick={() => navigate('/dashboard')}
+            >
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
                 <Calculator className="w-4 h-4 text-primary-foreground" />
               </div>
@@ -172,6 +221,18 @@ export default function AppLayout({ children }: AppLayoutProps) {
           <div className="flex-1" />
           
           <div className="flex items-center gap-4">
+            {/* SLO indicator */}
+            <div className="hidden sm:flex items-center gap-2" title={tooltipText}>
+              <span className="text-xs text-muted-foreground">Импорт</span>
+              <span
+                className={cn(
+                  'text-xs px-2 py-0.5 rounded',
+                  statusToClasses(slo.overallStatus)
+                )}
+              >
+                {slo.isLoading ? 'обновление…' : statusLabel(slo.overallStatus)}
+              </span>
+            </div>
             <div className="text-right">
               <p className="text-sm font-medium">Moldova Financial</p>
               <p className="text-xs text-muted-foreground">Система учёта кредитов</p>

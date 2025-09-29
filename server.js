@@ -2437,6 +2437,477 @@ app.delete('/api/credits/:id', async (req, res) => {
   }
 });
 
+// Reports API endpoints
+app.get('/api/reports/overdue', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, bankId } = req.query;
+    
+    let query = `
+      SELECT 
+        c.contract_number,
+        c.id as credit_id,
+        b.name as bank_name,
+        COALESCE(SUM(p.amount), 0) as total_paid,
+        c.principal,
+        (c.principal - COALESCE(SUM(p.amount), 0)) as remaining_balance,
+        CASE 
+          WHEN MAX(p.payment_date) IS NULL THEN EXTRACT(DAY FROM NOW() - c.start_date)
+          ELSE EXTRACT(DAY FROM NOW() - MAX(p.payment_date))
+        END as days_overdue
+      FROM credits c
+      LEFT JOIN banks b ON c.bank_id = b.id
+      LEFT JOIN payments p ON c.id = p.credit_id
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    let paramIndex = 1;
+    
+    if (dateFrom) {
+      query += ` AND c.start_date >= $${paramIndex}`;
+      params.push(dateFrom);
+      paramIndex++;
+    }
+    
+    if (dateTo) {
+      query += ` AND c.start_date <= $${paramIndex}`;
+      params.push(dateTo);
+      paramIndex++;
+    }
+    
+    if (bankId && bankId !== 'all') {
+      query += ` AND c.bank_id = $${paramIndex}`;
+      params.push(bankId);
+      paramIndex++;
+    }
+    
+    query += `
+      GROUP BY c.id, c.contract_number, c.principal, b.name
+      HAVING (c.principal - COALESCE(SUM(p.amount), 0)) > 0
+      ORDER BY days_overdue DESC
+    `;
+    
+    const result = await pool.query(query, params);
+    
+    const overdueItems = result.rows.map(row => ({
+      contract: row.contract_number,
+      amount: parseFloat(row.remaining_balance),
+      days: parseInt(row.days_overdue),
+      bank: row.bank_name
+    }));
+    
+    const totalAmount = overdueItems.reduce((sum, item) => sum + item.amount, 0);
+    const count = overdueItems.length;
+    const averageDays = count > 0 ? Math.round(overdueItems.reduce((sum, item) => sum + item.days, 0) / count) : 0;
+    
+    res.json({
+      totalAmount,
+      count,
+      averageDays,
+      items: overdueItems
+    });
+    
+  } catch (error) {
+    console.error('Error fetching overdue report:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/reports/forecast', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, bankId } = req.query;
+    
+    // Получаем все активные кредиты с их графиками
+    let query = `
+      SELECT 
+        c.id,
+        c.contract_number,
+        c.principal,
+        c.start_date,
+        c.term_months,
+        c.payment_day,
+        b.name as bank_name,
+        COALESCE(cr.rate, c.initial_rate) as current_rate
+      FROM credits c
+      LEFT JOIN banks b ON c.bank_id = b.id
+      LEFT JOIN credit_rates cr ON c.id = cr.credit_id 
+        AND cr.effective_date = (
+          SELECT MAX(effective_date) 
+          FROM credit_rates 
+          WHERE credit_id = c.id 
+          AND effective_date <= CURRENT_DATE
+        )
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    let paramIndex = 1;
+    
+    if (bankId && bankId !== 'all') {
+      query += ` AND c.bank_id = $${paramIndex}`;
+      params.push(bankId);
+      paramIndex++;
+    }
+    
+    const result = await pool.query(query, params);
+    
+    // Генерируем прогноз на следующие 3 месяца
+    const now = new Date();
+    const forecastMonths = [];
+    
+    for (let i = 0; i < 3; i++) {
+      const month = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const monthStr = month.toISOString().substring(0, 7);
+      
+      let monthlyAmount = 0;
+      let paymentCount = 0;
+      
+      result.rows.forEach(credit => {
+        // Простой расчет ежемесячного платежа (аннуитет)
+        const rate = parseFloat(credit.current_rate) / 100 / 12;
+        const principal = parseFloat(credit.principal);
+        const termMonths = credit.term_months;
+        
+        if (rate > 0) {
+          const monthlyPayment = principal * (rate * Math.pow(1 + rate, termMonths)) / (Math.pow(1 + rate, termMonths) - 1);
+          monthlyAmount += monthlyPayment;
+          paymentCount++;
+        }
+      });
+      
+      forecastMonths.push({
+        month: monthStr,
+        amount: monthlyAmount,
+        count: paymentCount
+      });
+    }
+    
+    const thisMonth = forecastMonths[0]?.amount || 0;
+    const nextMonth = forecastMonths[1]?.amount || 0;
+    const quarter = forecastMonths.reduce((sum, month) => sum + month.amount, 0);
+    
+    res.json({
+      thisMonth,
+      nextMonth,
+      quarter,
+      items: forecastMonths
+    });
+    
+  } catch (error) {
+    console.error('Error fetching forecast report:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/reports/portfolio', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, bankId } = req.query;
+    
+    let query = `
+      SELECT 
+        b.name as bank_name,
+        COUNT(c.id) as credit_count,
+        SUM(c.principal) as total_principal,
+        AVG(COALESCE(cr.rate, c.initial_rate)) as avg_rate,
+        SUM(COALESCE(p.total_paid, 0)) as total_paid
+      FROM credits c
+      LEFT JOIN banks b ON c.bank_id = b.id
+      LEFT JOIN credit_rates cr ON c.id = cr.credit_id 
+        AND cr.effective_date = (
+          SELECT MAX(effective_date) 
+          FROM credit_rates 
+          WHERE credit_id = c.id 
+          AND effective_date <= CURRENT_DATE
+        )
+      LEFT JOIN (
+        SELECT credit_id, SUM(amount) as total_paid
+        FROM payments
+        GROUP BY credit_id
+      ) p ON c.id = p.credit_id
+      WHERE 1=1
+    `;
+    
+    const params = [];
+    let paramIndex = 1;
+    
+    if (dateFrom) {
+      query += ` AND c.start_date >= $${paramIndex}`;
+      params.push(dateFrom);
+      paramIndex++;
+    }
+    
+    if (dateTo) {
+      query += ` AND c.start_date <= $${paramIndex}`;
+      params.push(dateTo);
+      paramIndex++;
+    }
+    
+    if (bankId && bankId !== 'all') {
+      query += ` AND c.bank_id = $${paramIndex}`;
+      params.push(bankId);
+      paramIndex++;
+    }
+    
+    query += ` GROUP BY b.id, b.name ORDER BY total_principal DESC`;
+    
+    const result = await pool.query(query, params);
+    
+    const portfolioData = result.rows.map(row => ({
+      bank: row.bank_name,
+      creditCount: parseInt(row.credit_count),
+      totalPrincipal: parseFloat(row.total_principal || 0),
+      avgRate: parseFloat(row.avg_rate || 0),
+      totalPaid: parseFloat(row.total_paid || 0),
+      remainingBalance: parseFloat(row.total_principal || 0) - parseFloat(row.total_paid || 0)
+    }));
+    
+    const totalPrincipal = portfolioData.reduce((sum, item) => sum + item.totalPrincipal, 0);
+    const totalCredits = portfolioData.reduce((sum, item) => sum + item.creditCount, 0);
+    const totalPaid = portfolioData.reduce((sum, item) => sum + item.totalPaid, 0);
+    
+    res.json({
+      totalPrincipal,
+      totalCredits,
+      totalPaid,
+      items: portfolioData
+    });
+    
+  } catch (error) {
+    console.error('Error fetching portfolio report:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/reports/interest', async (req, res) => {
+  try {
+    const { dateFrom, dateTo, bankId } = req.query;
+    
+    let query = `
+      SELECT 
+        c.contract_number,
+        b.name as bank_name,
+        SUM(p.interest_amount) as total_interest,
+        COUNT(p.id) as payment_count,
+        AVG(COALESCE(cr.rate, c.initial_rate)) as avg_rate
+      FROM credits c
+      LEFT JOIN banks b ON c.bank_id = b.id
+      LEFT JOIN payments p ON c.id = p.credit_id
+      LEFT JOIN credit_rates cr ON c.id = cr.credit_id 
+        AND cr.effective_date = (
+          SELECT MAX(effective_date) 
+          FROM credit_rates 
+          WHERE credit_id = c.id 
+          AND effective_date <= CURRENT_DATE
+        )
+      WHERE p.interest_amount IS NOT NULL AND p.interest_amount > 0
+    `;
+    
+    const params = [];
+    let paramIndex = 1;
+    
+    if (dateFrom) {
+      query += ` AND p.payment_date >= $${paramIndex}`;
+      params.push(dateFrom);
+      paramIndex++;
+    }
+    
+    if (dateTo) {
+      query += ` AND p.payment_date <= $${paramIndex}`;
+      params.push(dateTo);
+      paramIndex++;
+    }
+    
+    if (bankId && bankId !== 'all') {
+      query += ` AND c.bank_id = $${paramIndex}`;
+      params.push(bankId);
+      paramIndex++;
+    }
+    
+    query += `
+      GROUP BY c.id, c.contract_number, b.name
+      ORDER BY total_interest DESC
+    `;
+    
+    const result = await pool.query(query, params);
+    
+    const interestData = result.rows.map(row => ({
+      contract: row.contract_number,
+      bank: row.bank_name,
+      totalInterest: parseFloat(row.total_interest || 0),
+      paymentCount: parseInt(row.payment_count),
+      avgRate: parseFloat(row.avg_rate || 0)
+    }));
+    
+    const totalInterest = interestData.reduce((sum, item) => sum + item.totalInterest, 0);
+    const totalPayments = interestData.reduce((sum, item) => sum + item.paymentCount, 0);
+    
+    res.json({
+      totalInterest,
+      totalPayments,
+      items: interestData
+    });
+    
+  } catch (error) {
+    console.error('Error fetching interest report:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// API endpoint для экспорта отчетов
+app.get('/api/reports/:type/export', async (req, res) => {
+  try {
+    const { type } = req.params;
+    const { dateFrom, dateTo, bankId, format = 'csv' } = req.query;
+
+    let query = '';
+    let params = [];
+    let filename = '';
+
+    // Определяем запрос в зависимости от типа отчета
+    switch (type) {
+      case 'overdue':
+        query = `
+          SELECT 
+            c.contract_number as contract,
+            COALESCE(c.principal - COALESCE(SUM(p.amount), 0), c.principal) as amount,
+            CASE 
+              WHEN MAX(p.payment_date) IS NULL THEN EXTRACT(DAY FROM NOW() - c.start_date)
+              ELSE EXTRACT(DAY FROM NOW() - MAX(p.payment_date))
+            END as days,
+            b.name as bank
+          FROM credits c
+          LEFT JOIN banks b ON c.bank_id = b.id
+          LEFT JOIN payments p ON c.id = p.credit_id
+          WHERE 1=1
+        `;
+        filename = 'overdue_report';
+        break;
+
+      case 'forecast':
+        query = `
+          SELECT 
+            TO_CHAR(DATE_TRUNC('month', c.start_date + INTERVAL '1 year'), 'YYYY-MM') as month,
+            SUM(c.principal) as amount,
+            COUNT(*) as count
+          FROM credits c
+          LEFT JOIN banks b ON c.bank_id = b.id
+          WHERE c.start_date >= NOW() - INTERVAL '1 year'
+        `;
+        filename = 'forecast_report';
+        break;
+
+      case 'portfolio':
+        query = `
+          SELECT 
+            b.name as bank,
+            COUNT(c.id) as credit_count,
+            SUM(c.principal) as total_principal,
+            AVG(cr.rate) as avg_rate,
+            COALESCE(SUM(p.amount), 0) as total_paid,
+            SUM(c.principal) - COALESCE(SUM(p.amount), 0) as remaining_balance
+          FROM banks b
+          LEFT JOIN credits c ON b.id = c.bank_id
+          LEFT JOIN credit_rates cr ON c.id = cr.credit_id
+          LEFT JOIN payments p ON c.id = p.credit_id
+          WHERE 1=1
+        `;
+        filename = 'portfolio_report';
+        break;
+
+      case 'interest':
+        query = `
+          SELECT 
+            c.contract_number as contract,
+            b.name as bank,
+            COALESCE(SUM(p.amount * cr.rate / 100), 0) as total_interest,
+            COUNT(p.id) as payment_count,
+            AVG(cr.rate) as avg_rate
+          FROM credits c
+          LEFT JOIN banks b ON c.bank_id = b.id
+          LEFT JOIN payments p ON c.id = p.credit_id
+          LEFT JOIN credit_rates cr ON c.id = cr.credit_id
+          WHERE 1=1
+        `;
+        filename = 'interest_report';
+        break;
+
+      default:
+        return res.status(400).json({ error: 'Invalid report type' });
+    }
+
+    // Добавляем фильтры
+    if (dateFrom) {
+      query += ` AND c.start_date >= $${params.length + 1}`;
+      params.push(dateFrom);
+    }
+
+    if (dateTo) {
+      query += ` AND c.start_date <= $${params.length + 1}`;
+      params.push(dateTo);
+    }
+
+    if (bankId) {
+      query += ` AND c.bank_id = $${params.length + 1}`;
+      params.push(bankId);
+    }
+
+    // Добавляем GROUP BY для агрегированных запросов
+    if (type === 'forecast') {
+      query += ' GROUP BY DATE_TRUNC(\'month\', c.start_date + INTERVAL \'1 year\') ORDER BY month';
+    } else if (type === 'portfolio') {
+      query += ' GROUP BY b.id, b.name ORDER BY b.name';
+    } else if (type === 'interest') {
+      query += ' GROUP BY c.id, c.contract_number, b.name ORDER BY c.contract_number';
+    } else if (type === 'overdue') {
+      query += ' GROUP BY c.id, c.contract_number, c.principal, c.start_date, b.name ORDER BY days DESC';
+    }
+
+    const result = await pool.query(query, params);
+
+    // Определяем Content-Type и расширение файла
+    let contentType = 'text/csv';
+    let fileExtension = 'csv';
+    
+    if (format === 'excel') {
+      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      fileExtension = 'xlsx';
+    } else if (format === 'pdf') {
+      contentType = 'application/pdf';
+      fileExtension = 'pdf';
+    }
+
+    // Устанавливаем заголовки для скачивания файла
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.${fileExtension}"`);
+
+    if (format === 'csv') {
+      // Генерируем CSV
+      if (result.rows.length === 0) {
+        return res.send('No data available');
+      }
+
+      const headers = Object.keys(result.rows[0]).join(',');
+      const csvData = result.rows.map(row => 
+        Object.values(row).map(value => 
+          typeof value === 'string' && value.includes(',') ? `"${value}"` : value
+        ).join(',')
+      ).join('\n');
+
+      res.send(`${headers}\n${csvData}`);
+    } else {
+      // Для Excel и PDF возвращаем JSON (в реальном приложении здесь была бы генерация соответствующих форматов)
+      res.json({
+        message: `${format.toUpperCase()} export not implemented yet`,
+        data: result.rows
+      });
+    }
+
+  } catch (error) {
+    console.error('Error exporting report:', error);
+    res.status(500).json({ error: 'Failed to export report' });
+  }
+});
+
 // Global error handler
 app.use((err, req, res, next) => {
   try {
@@ -2454,10 +2925,24 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-// Fallback route for debugging
+// Serve static files from dist directory
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use(express.static(path.join(__dirname, 'dist')));
+
+// Fallback route for SPA - serve index.html for non-API routes
 app.use((req, res) => {
-  console.log(`[DEBUG] 404 on ${req.method} ${req.path}`);
-  res.status(404).json({ error: 'Route not found', path: req.path });
+  // Don't serve index.html for API routes
+  if (req.path.startsWith('/api/')) {
+    console.log(`[DEBUG] 404 on ${req.method} ${req.path}`);
+    res.status(404).json({ error: 'Route not found', path: req.path });
+  } else {
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  }
 });
 
 app.listen(port, host, () => {

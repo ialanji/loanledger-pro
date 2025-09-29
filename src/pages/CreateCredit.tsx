@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Trash2, Calculator, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,12 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CalculationMethod } from '@/types/credit';
 import { ScheduleEngine } from '@/services/schedule-engine';
 import { useToast } from '@/hooks/use-toast';
+
+interface Bank {
+  id: string;
+  name: string;
+  code: string;
+}
 
 interface CreditFormData {
   contractNumber: string;
@@ -34,19 +40,19 @@ interface RateEntry {
   note: string;
 }
 
-const mockBanks = [
-  { id: '1', name: 'Moldindconbank', code: 'MICB' },
-  { id: '2', name: 'Banca Transilvania MD', code: 'BTMD' },
-  { id: '3', name: 'Victoriabank', code: 'VICT' },
-  { id: '4', name: 'Maib', code: 'MAIB' },
-  { id: '5', name: 'EuroCreditBank', code: 'EUCB' }
-];
+function parseDateOnly(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  // Используем полдень, чтобы избежать проблем со смещением из‑за часовых поясов и DST
+  return new Date(year, (month || 1) - 1, day || 1, 12, 0, 0, 0);
+}
 
 export default function CreateCredit() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [banks, setBanks] = useState<Bank[]>([]);
+  const [isLoadingBanks, setIsLoadingBanks] = useState(true);
 
   const [formData, setFormData] = useState<CreditFormData>({
     contractNumber: '',
@@ -54,7 +60,7 @@ export default function CreateCredit() {
     currencyCode: 'MDL',
     bankId: '',
     method: '',
-    paymentDay: '15',
+    paymentDay: '20',
     startDate: new Date().toISOString().split('T')[0],
     termMonths: '',
     defermentMonths: '0',
@@ -65,9 +71,30 @@ export default function CreateCredit() {
 
   const [rateHistory, setRateHistory] = useState<RateEntry[]>([]);
 
-  const updateFormData = (field: keyof CreditFormData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
+  // Fetch banks on component mount
+  useEffect(() => {
+    const fetchBanks = async () => {
+      try {
+        const response = await fetch('/api/banks');
+        if (!response.ok) {
+          throw new Error('Failed to fetch banks');
+        }
+        const banksData = await response.json();
+        setBanks(banksData);
+      } catch (error) {
+        console.error('Error fetching banks:', error);
+        toast({
+          title: "Ошибка",
+          description: "Не удалось загрузить список банков",
+          variant: "destructive"
+        });
+      } finally {
+        setIsLoadingBanks(false);
+      }
+    };
+
+    fetchBanks();
+  }, [toast]);
 
   const addRateEntry = () => {
     const newRate: RateEntry = {
@@ -79,7 +106,19 @@ export default function CreateCredit() {
     setRateHistory(prev => [...prev, newRate]);
   };
 
+  const updateFormData = (field: keyof CreditFormData, value: string) => {
+    // Fix decimal separator for rate fields
+    if (field === 'initialRate' && value) {
+      value = value.replace(',', '.');
+    }
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
   const updateRateEntry = (id: string, field: keyof Omit<RateEntry, 'id'>, value: string) => {
+    // Fix decimal separator for rate field
+    if (field === 'annualPercent' && value) {
+      value = value.replace(',', '.');
+    }
     setRateHistory(prev => prev.map(rate => 
       rate.id === id ? { ...rate, [field]: value } : rate
     ));
@@ -114,8 +153,102 @@ export default function CreateCredit() {
     setIsSubmitting(true);
 
     try {
-      // Здесь будет вызов API для создания кредита
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Имитация API
+      // Validate rate history dates for floating methods
+      if (isFloatingMethod && rateHistory.length > 0) {
+        const creditStartDateObj = parseDateOnly(formData.startDate);
+        const invalidRates = rateHistory.filter(rate => {
+          if (!rate.effectiveDate) return false;
+          const rateDate = parseDateOnly(rate.effectiveDate);
+          return rateDate < creditStartDateObj;
+        });
+
+        if (invalidRates.length > 0) {
+          toast({
+            title: "Ошибка валидации",
+            description: "Дата начала действия ставки не может быть раньше даты начала кредита",
+            variant: "destructive"
+          });
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Ensure rate history dates are in ascending order (no overlaps)
+        const sortedDates = rateHistory
+          .filter(r => !!r.effectiveDate)
+          .map(r => r.effectiveDate)
+          .sort(); // сортируем строки YYYY-MM-DD
+
+        const isAscending = sortedDates.every((dateStr, idx, arr) => {
+          if (idx === 0) return true;
+          const prev = parseDateOnly(arr[idx - 1]);
+          const cur = parseDateOnly(dateStr);
+          return cur > prev; // строго по возрастанию
+        });
+
+        if (!isAscending) {
+          toast({
+            title: "Ошибка валидации",
+            description: "Даты ставок должны идти по возрастанию и не пересекаться",
+            variant: "destructive"
+          });
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      // Safely prepare optional numeric fields
+      const paymentDayVal = formData.paymentDay ? parseInt(formData.paymentDay, 10) : undefined;
+      const defermentMonthsVal = formData.defermentMonths ? parseInt(formData.defermentMonths, 10) : 0;
+
+      // Prepare initial rate: omit when empty to satisfy DB check (initial_rate > 0)
+      const initialRateStr = (formData.initialRate ?? '').trim();
+      const initialRateVal = initialRateStr ? parseFloat(initialRateStr.replace(',', '.')) / 100 : undefined;
+      const rateEffectiveDateVal = initialRateVal !== undefined ? formData.rateEffectiveDate : undefined;
+
+      // Prepare rate history for floating methods
+      const preparedRateHistory = isFloatingMethod
+        ? rateHistory
+            .filter(r => r.annualPercent && r.effectiveDate)
+            .map(r => ({
+              rate: parseFloat((r.annualPercent || '0').replace(',', '.')) / 100,
+              effectiveDate: r.effectiveDate,
+              note: r.note
+            }))
+        : undefined;
+
+      // Prepare credit data for API
+      const creditData: any = {
+        contractNumber: formData.contractNumber,
+        principal: parseFloat(formData.principal),
+        currencyCode: formData.currencyCode,
+        bankId: formData.bankId,
+        method: formData.method,
+        startDate: formData.startDate,
+        termMonths: parseInt(formData.termMonths, 10),
+        defermentMonths: defermentMonthsVal,
+        notes: formData.notes,
+      };
+
+      // Set optional fields only if provided
+      if (paymentDayVal !== undefined) creditData.paymentDay = paymentDayVal;
+      if (initialRateVal !== undefined) creditData.initialRate = initialRateVal;
+      if (rateEffectiveDateVal !== undefined) creditData.rateEffectiveDate = rateEffectiveDateVal;
+      if (preparedRateHistory) creditData.rateHistory = preparedRateHistory;
+
+      const response = await fetch('/api/credits', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(creditData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create credit');
+      }
+
+      const result = await response.json();
 
       toast({
         title: "Кредит создан",
@@ -124,9 +257,10 @@ export default function CreateCredit() {
 
       navigate('/credits');
     } catch (error) {
+      console.error('Error creating credit:', error);
       toast({
         title: "Ошибка",
-        description: "Не удалось создать кредит. Попробуйте ещё раз.",
+        description: error instanceof Error ? error.message : "Не удалось создать кредит. Попробуйте ещё раз.",
         variant: "destructive"
       });
     } finally {
@@ -137,12 +271,18 @@ export default function CreateCredit() {
   const getMethodLabel = (method: string) => {
     switch (method) {
       case CalculationMethod.CLASSIC_ANNUITY:
+      case 'classic_annuity':
         return 'Классический аннуитет';
       case CalculationMethod.CLASSIC_DIFFERENTIATED:
+      case 'classic_differentiated':
         return 'Классический дифференцированный';
       case CalculationMethod.FLOATING_ANNUITY:
+      case 'floating_annuity':
         return 'Плавающий аннуитет';
       case CalculationMethod.FLOATING_DIFFERENTIATED:
+      case 'floating_differentiated':
+        return 'Плавающий дифференцированный';
+      case 'floating':
         return 'Плавающий дифференцированный';
       default:
         return method;
@@ -194,7 +334,7 @@ export default function CreateCredit() {
                     step="0.01"
                     value={formData.principal}
                     onChange={(e) => updateFormData('principal', e.target.value)}
-                    placeholder="500000"
+                    placeholder="10000000"
                     required
                   />
                   <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-sm text-muted-foreground">
@@ -207,10 +347,10 @@ export default function CreateCredit() {
                 <Label htmlFor="bank">Банк *</Label>
                 <Select value={formData.bankId} onValueChange={(value) => updateFormData('bankId', value)}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Выберите банк" />
+                    <SelectValue placeholder={isLoadingBanks ? "Загрузка..." : "Выберите банк"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {mockBanks.map(bank => (
+                    {banks.map(bank => (
                       <SelectItem key={bank.id} value={bank.id}>
                         {bank.name} ({bank.code})
                       </SelectItem>
@@ -320,7 +460,7 @@ export default function CreateCredit() {
                     step="0.01"
                     value={formData.initialRate}
                     onChange={(e) => updateFormData('initialRate', e.target.value)}
-                    placeholder="12.50"
+                    placeholder="9.9"
                     required
                   />
                 </div>
@@ -361,6 +501,7 @@ export default function CreateCredit() {
                             type="date"
                             value={rate.effectiveDate}
                             onChange={(e) => updateRateEntry(rate.id, 'effectiveDate', e.target.value)}
+                            min={formData.startDate}
                           />
                         </div>
                         <div className="space-y-2">

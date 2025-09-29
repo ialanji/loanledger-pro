@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,9 +14,11 @@ import {
   AlertTriangle,
   DollarSign,
   FileSpreadsheet,
-  FileBarChart
+  FileBarChart,
+  Loader2
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/utils/formatters';
+import { reportsService, type OverdueReportData, type ForecastReportData, type PortfolioReportData, type InterestReportData, type ReportFilters } from '@/services/reportsService';
 
 const reportTypes = [
   {
@@ -49,28 +51,10 @@ const reportTypes = [
   }
 ];
 
-const mockReportData = {
-  overdue: {
-    totalAmount: 156780.50,
-    count: 12,
-    averageDays: 15,
-    items: [
-      { contract: 'CRD-2024-001', amount: 45600.00, days: 25, bank: 'MAIB' },
-      { contract: 'CRD-2024-003', amount: 32150.50, days: 12, bank: 'BEM' },
-      { contract: 'CRD-2024-007', amount: 79030.00, days: 8, bank: 'ProCredit' }
-    ]
-  },
-  forecast: {
-    thisMonth: 234500.00,
-    nextMonth: 187650.00,
-    quarter: 756890.00,
-    items: [
-      { month: '2024-02', amount: 234500.00, count: 28 },
-      { month: '2024-03', amount: 187650.00, count: 24 },
-      { month: '2024-04', amount: 198740.00, count: 26 }
-    ]
-  }
-};
+interface Bank {
+  id: string;
+  name: string;
+}
 
 export default function Reports() {
   const [selectedReport, setSelectedReport] = useState('');
@@ -78,42 +62,130 @@ export default function Reports() {
   const [dateTo, setDateTo] = useState('');
   const [selectedBank, setSelectedBank] = useState('all');
   const [exportFormat, setExportFormat] = useState('pdf');
+  const [banks, setBanks] = useState<Bank[]>([]);
+  const [reportData, setReportData] = useState<OverdueReportData | ForecastReportData | PortfolioReportData | InterestReportData | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleGenerateReport = () => {
-    console.log('Generating report:', {
-      type: selectedReport,
-      dateFrom,
-      dateTo,
-      bank: selectedBank,
-      format: exportFormat
-    });
-    // TODO: Implement report generation
+  useEffect(() => {
+    const loadBanks = async () => {
+      try {
+        const banksData = await reportsService.getBanks();
+        setBanks(banksData);
+      } catch (err) {
+        console.error('Failed to load banks:', err);
+      }
+    };
+    loadBanks();
+  }, []);
+
+  const handleGenerateReport = async () => {
+    if (!selectedReport) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const filters: ReportFilters = {
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        bankId: selectedBank !== 'all' ? selectedBank : undefined
+      };
+
+      let data;
+      switch (selectedReport) {
+        case 'overdue':
+          data = await reportsService.getOverdueReport(filters);
+          break;
+        case 'forecast':
+          data = await reportsService.getForecastReport(filters);
+          break;
+        case 'portfolio':
+          data = await reportsService.getPortfolioReport(filters);
+          break;
+        case 'interest':
+          data = await reportsService.getInterestReport(filters);
+          break;
+        default:
+          throw new Error('Unknown report type');
+      }
+
+      setReportData(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка при генерации отчета');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleExport = (format: string) => {
-    console.log('Exporting report in format:', format);
-    // TODO: Implement export functionality
+  const handleExport = async (format: string) => {
+    if (!selectedReport || !reportData) return;
+
+    try {
+      const filters: ReportFilters = {
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        bankId: selectedBank !== 'all' ? selectedBank : undefined
+      };
+
+      await reportsService.exportReport(selectedReport, format, filters);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка при экспорте отчета');
+    }
   };
 
   const getReportPreview = () => {
     if (!selectedReport) return null;
 
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="h-8 w-8 animate-spin" />
+          <span className="ml-2">Загрузка отчета...</span>
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="text-center py-8">
+          <p className="text-destructive">{error}</p>
+          <Button 
+            variant="outline" 
+            onClick={handleGenerateReport}
+            className="mt-4"
+          >
+            Попробовать снова
+          </Button>
+        </div>
+      );
+    }
+
+    if (!reportData) {
+      return (
+        <div className="text-center py-8">
+          <p className="text-muted-foreground">Нажмите "Создать отчет" для просмотра данных</p>
+        </div>
+      );
+    }
+
     switch (selectedReport) {
       case 'overdue':
+        const overdueData = reportData as OverdueReportData;
         return (
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-destructive/10 p-4 rounded-lg">
                 <h4 className="font-semibold text-destructive">Общая сумма</h4>
-                <p className="text-2xl font-bold">{formatCurrency(mockReportData.overdue.totalAmount)}</p>
+                <p className="text-2xl font-bold">{formatCurrency(overdueData.totalAmount)}</p>
               </div>
               <div className="bg-warning/10 p-4 rounded-lg">
                 <h4 className="font-semibold">Количество</h4>
-                <p className="text-2xl font-bold">{mockReportData.overdue.count}</p>
+                <p className="text-2xl font-bold">{overdueData.count}</p>
               </div>
               <div className="bg-muted p-4 rounded-lg">
                 <h4 className="font-semibold">Средний срок</h4>
-                <p className="text-2xl font-bold">{mockReportData.overdue.averageDays} дней</p>
+                <p className="text-2xl font-bold">{overdueData.averageDays} дней</p>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -127,7 +199,7 @@ export default function Reports() {
                   </tr>
                 </thead>
                 <tbody>
-                  {mockReportData.overdue.items.map((item, index) => (
+                  {overdueData.items.map((item, index) => (
                     <tr key={index}>
                       <td className="font-medium">{item.contract}</td>
                       <td className="financial-amount negative">{formatCurrency(item.amount)}</td>
@@ -142,20 +214,21 @@ export default function Reports() {
         );
 
       case 'forecast':
+        const forecastData = reportData as ForecastReportData;
         return (
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-primary/10 p-4 rounded-lg">
                 <h4 className="font-semibold text-primary">Этот месяц</h4>
-                <p className="text-2xl font-bold">{formatCurrency(mockReportData.forecast.thisMonth)}</p>
+                <p className="text-2xl font-bold">{formatCurrency(forecastData.thisMonth)}</p>
               </div>
               <div className="bg-accent/10 p-4 rounded-lg">
                 <h4 className="font-semibold text-accent">Следующий месяц</h4>
-                <p className="text-2xl font-bold">{formatCurrency(mockReportData.forecast.nextMonth)}</p>
+                <p className="text-2xl font-bold">{formatCurrency(forecastData.nextMonth)}</p>
               </div>
               <div className="bg-success/10 p-4 rounded-lg">
                 <h4 className="font-semibold text-success">Квартал</h4>
-                <p className="text-2xl font-bold">{formatCurrency(mockReportData.forecast.quarter)}</p>
+                <p className="text-2xl font-bold">{formatCurrency(forecastData.quarter)}</p>
               </div>
             </div>
             <div className="overflow-x-auto">
@@ -168,7 +241,7 @@ export default function Reports() {
                   </tr>
                 </thead>
                 <tbody>
-                  {mockReportData.forecast.items.map((item, index) => (
+                  {forecastData.items.map((item, index) => (
                     <tr key={index}>
                       <td className="font-medium">{item.month}</td>
                       <td className="financial-amount positive">{formatCurrency(item.amount)}</td>
@@ -181,12 +254,102 @@ export default function Reports() {
           </div>
         );
 
-      default:
-        return (
-          <div className="text-center py-8">
-            <p className="text-muted-foreground">Выберите тип отчета для просмотра данных</p>
-          </div>
-        );
+      case 'portfolio':
+          const portfolioData = reportData as PortfolioReportData;
+          return (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-primary/10 p-4 rounded-lg">
+                  <h4 className="font-semibold text-primary">Общая сумма кредитов</h4>
+                  <p className="text-2xl font-bold">{formatCurrency(portfolioData.totalPrincipal)}</p>
+                </div>
+                <div className="bg-accent/10 p-4 rounded-lg">
+                  <h4 className="font-semibold text-accent">Количество кредитов</h4>
+                  <p className="text-2xl font-bold">{portfolioData.totalCredits}</p>
+                </div>
+                <div className="bg-success/10 p-4 rounded-lg">
+                  <h4 className="font-semibold text-success">Выплачено</h4>
+                  <p className="text-2xl font-bold">{formatCurrency(portfolioData.totalPaid)}</p>
+                </div>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="finance-table">
+                  <thead>
+                    <tr>
+                      <th>Банк</th>
+                      <th>Кредитов</th>
+                      <th>Основная сумма</th>
+                      <th>Средняя ставка</th>
+                      <th>Выплачено</th>
+                      <th>Остаток</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {portfolioData.items.map((item, index) => (
+                      <tr key={index}>
+                        <td className="font-medium">{item.bank}</td>
+                        <td>{item.creditCount}</td>
+                        <td className="financial-amount">{formatCurrency(item.totalPrincipal)}</td>
+                        <td>{item.avgRate.toFixed(2)}%</td>
+                        <td className="financial-amount positive">{formatCurrency(item.totalPaid)}</td>
+                        <td className="financial-amount">{formatCurrency(item.remainingBalance)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        
+        case 'interest':
+          const interestData = reportData as InterestReportData;
+          return (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-primary/10 p-4 rounded-lg">
+                  <h4 className="font-semibold text-primary">Общий процентный доход</h4>
+                  <p className="text-2xl font-bold">{formatCurrency(interestData.totalInterest)}</p>
+                </div>
+                <div className="bg-accent/10 p-4 rounded-lg">
+                  <h4 className="font-semibold text-accent">Количество платежей</h4>
+                  <p className="text-2xl font-bold">{interestData.totalPayments}</p>
+                </div>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="finance-table">
+                  <thead>
+                    <tr>
+                      <th>Договор</th>
+                      <th>Банк</th>
+                      <th>Процентный доход</th>
+                      <th>Платежей</th>
+                      <th>Средняя ставка</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {interestData.items.map((item, index) => (
+                      <tr key={index}>
+                        <td className="font-medium">{item.contract}</td>
+                        <td>{item.bank}</td>
+                        <td className="financial-amount positive">{formatCurrency(item.totalInterest)}</td>
+                        <td>{item.paymentCount}</td>
+                        <td>{item.avgRate.toFixed(2)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+
+        default:
+          return (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">Выберите тип отчета для просмотра данных</p>
+            </div>
+          );
     }
   };
 
@@ -266,9 +429,11 @@ export default function Reports() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Все банки</SelectItem>
-                  <SelectItem value="maib">Moldova Agroindbank</SelectItem>
-                  <SelectItem value="bem">Banca de Economii</SelectItem>
-                  <SelectItem value="procredit">ProCredit Bank</SelectItem>
+                  {banks.map((bank) => (
+                    <SelectItem key={bank.id} value={bank.id}>
+                      {bank.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

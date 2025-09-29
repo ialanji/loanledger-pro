@@ -218,4 +218,30 @@ All colors MUST be HSL for consistency.
     background: var(--gradient-success);
     box-shadow: var(--shadow-success);
   }
+
+  /* Payment Schedule Table Styles */
+  .finance-table {
+    @apply w-full border-collapse;
+  }
+
+  .finance-table th {
+    @apply bg-muted/50 px-4 py-3 text-sm font-semibold text-muted-foreground border-b border-border;
+  }
+
+  .finance-table td {
+    @apply px-4 py-3 text-sm border-b border-border/50;
+  }
+
+  .finance-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* Statistics Cards */
+  .stat-card {
+    @apply p-6 transition-all duration-200 hover:shadow-md;
+  }
+
+  .stat-card .financial-amount {
+    @apply text-foreground;
+  }
 }

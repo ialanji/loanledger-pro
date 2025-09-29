@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -10,96 +10,134 @@ import {
   Building2, 
   Edit, 
   Trash2,
-  MapPin,
-  Phone,
-  Globe
+  Phone
 } from 'lucide-react';
 
-// Mock data
-const mockBanks = [
-  {
-    id: '1',
-    name: 'Moldova Agroindbank',
-    code: 'MAIB',
-    swift: 'AGRNMD2X',
-    address: 'str. Cosmonautilor 7, Chisinau',
-    phone: '+373 22 270 270',
-    website: 'https://www.maib.md',
-    creditsCount: 12,
-    totalAmount: 2450000.00
-  },
-  {
-    id: '2',
-    name: 'Banca de Economii',
-    code: 'BEM',
-    swift: 'BEMRMD22',
-    address: 'bd. Stefan cel Mare 8, Chisinau',
-    phone: '+373 22 221 111',
-    website: 'https://www.bem.md',
-    creditsCount: 8,
-    totalAmount: 1850000.00
-  },
-  {
-    id: '3',
-    name: 'ProCredit Bank',
-    code: 'PCB',
-    swift: 'PCRB MD22',
-    address: 'str. Timisoara 35, Chisinau',
-    phone: '+373 22 270 900',
-    website: 'https://www.procreditbank.md',
-    creditsCount: 5,
-    totalAmount: 980000.00
-  }
-];
+interface Bank {
+  id: string;
+  name: string;
+  code: string;
+  country?: string;
+  currency_code?: string;
+  contact_info?: string | { phone?: string; website?: string };
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
 
-const initialBankForm = {
+const initialFormData = {
   name: '',
   code: '',
-  swift: '',
-  address: '',
-  phone: '',
-  website: ''
+  country: '',
+  currency_code: '',
+  contact_info: '',
+  notes: ''
 };
 
 export default function Banks() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingBank, setEditingBank] = useState<any>(null);
-  const [bankForm, setBankForm] = useState(initialBankForm);
+  const [editingBank, setEditingBank] = useState<Bank | null>(null);
+  const [formData, setFormData] = useState(initialFormData);
+  const [banks, setBanks] = useState<Bank[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const filteredBanks = mockBanks.filter(bank =>
+  // Fetch banks from API
+  const fetchBanks = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/banks');
+      if (!response.ok) {
+        throw new Error('Failed to fetch banks');
+      }
+      const banksData = await response.json();
+      setBanks(banksData);
+    } catch (error) {
+      console.error('Error fetching banks:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBanks();
+  }, []);
+
+  const filteredBanks = banks.filter(bank =>
     bank.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     bank.code.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleSave = () => {
-    console.log('Saving bank:', bankForm);
-    // TODO: Implement save logic
-    setIsDialogOpen(false);
-    setBankForm(initialBankForm);
-    setEditingBank(null);
+  const handleSave = async () => {
+    try {
+      const url = editingBank 
+        ? `/api/banks/${editingBank.id}`
+        : '/api/banks';
+      
+      const method = editingBank ? 'PUT' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save bank');
+      }
+
+      // Refresh banks list
+      await fetchBanks();
+      
+      // Reset form and close dialog
+      setFormData(initialFormData);
+      setEditingBank(null);
+      setIsDialogOpen(false);
+    } catch (error) {
+      console.error('Error saving bank:', error);
+    }
   };
 
-  const handleEdit = (bank: any) => {
+  const handleEdit = (bank: Bank) => {
     setEditingBank(bank);
-    setBankForm({
+    setFormData({
       name: bank.name,
-      code: bank.code,
-      swift: bank.swift,
-      address: bank.address,
-      phone: bank.phone,
-      website: bank.website
+      code: bank.code || '',
+      country: bank.country || '',
+      currency_code: bank.currency_code || '',
+      contact_info: typeof bank.contact_info === 'string' 
+        ? bank.contact_info 
+        : bank.contact_info 
+          ? `Телефон: ${bank.contact_info.phone || ''}\nСайт: ${bank.contact_info.website || ''}`
+          : '',
+      notes: bank.notes || ''
     });
     setIsDialogOpen(true);
   };
 
-  const handleDelete = (bankId: string) => {
-    console.log('Deleting bank:', bankId);
-    // TODO: Implement delete logic
+  const handleDelete = async (bankId: string) => {
+    if (window.confirm('Вы уверены, что хотите удалить этот банк?')) {
+      try {
+        const response = await fetch(`/api/banks/${bankId}`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to delete bank');
+        }
+
+        // Refresh banks list
+        await fetchBanks();
+      } catch (error) {
+        console.error('Error deleting bank:', error);
+      }
+    }
   };
 
   const resetForm = () => {
-    setBankForm(initialBankForm);
+    setFormData(initialFormData);
     setEditingBank(null);
   };
 
@@ -135,8 +173,8 @@ export default function Banks() {
                 <Label htmlFor="name">Название банка *</Label>
                 <Input
                   id="name"
-                  value={bankForm.name}
-                  onChange={(e) => setBankForm({...bankForm, name: e.target.value})}
+                  value={formData.name}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
                   placeholder="Например: Moldova Agroindbank"
                 />
               </div>
@@ -144,45 +182,45 @@ export default function Banks() {
                 <Label htmlFor="code">Код банка</Label>
                 <Input
                   id="code"
-                  value={bankForm.code}
-                  onChange={(e) => setBankForm({...bankForm, code: e.target.value})}
+                  value={formData.code}
+                  onChange={(e) => setFormData({...formData, code: e.target.value})}
                   placeholder="Например: MAIB"
                 />
               </div>
               <div>
-                <Label htmlFor="swift">SWIFT код</Label>
+                <Label htmlFor="country">Страна</Label>
                 <Input
-                  id="swift"
-                  value={bankForm.swift}
-                  onChange={(e) => setBankForm({...bankForm, swift: e.target.value})}
-                  placeholder="Например: AGRNMD2X"
+                  id="country"
+                  value={formData.country}
+                  onChange={(e) => setFormData({...formData, country: e.target.value})}
+                  placeholder="Например: Moldova"
                 />
               </div>
               <div>
-                <Label htmlFor="address">Адрес</Label>
+                <Label htmlFor="currency_code">Код валюты</Label>
                 <Input
-                  id="address"
-                  value={bankForm.address}
-                  onChange={(e) => setBankForm({...bankForm, address: e.target.value})}
-                  placeholder="Улица, город"
+                  id="currency_code"
+                  value={formData.currency_code}
+                  onChange={(e) => setFormData({...formData, currency_code: e.target.value})}
+                  placeholder="MDL, USD, EUR..."
                 />
               </div>
               <div>
-                <Label htmlFor="phone">Телефон</Label>
+                <Label htmlFor="contact_info">Контактная информация</Label>
                 <Input
-                  id="phone"
-                  value={bankForm.phone}
-                  onChange={(e) => setBankForm({...bankForm, phone: e.target.value})}
-                  placeholder="+373 22 XXX XXX"
+                  id="contact_info"
+                  value={formData.contact_info}
+                  onChange={(e) => setFormData({...formData, contact_info: e.target.value})}
+                  placeholder="Телефон, email или адрес"
                 />
               </div>
               <div>
-                <Label htmlFor="website">Веб-сайт</Label>
+                <Label htmlFor="notes">Заметки</Label>
                 <Input
-                  id="website"
-                  value={bankForm.website}
-                  onChange={(e) => setBankForm({...bankForm, website: e.target.value})}
-                  placeholder="https://example.com"
+                  id="notes"
+                  value={formData.notes}
+                  onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                  placeholder="Дополнительная информация"
                 />
               </div>
               <div className="flex gap-2 pt-4">
@@ -195,6 +233,9 @@ export default function Banks() {
                   className="flex-1"
                 >
                   Отмена
+                </Button>
+                <Button variant="secondary" onClick={resetForm}>
+                  Сбросить
                 </Button>
               </div>
             </div>
@@ -218,94 +259,103 @@ export default function Banks() {
       </Card>
 
       {/* Banks Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredBanks.map((bank) => (
-          <Card key={bank.id} className="stat-card">
-            <CardHeader className="pb-4">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary/10 rounded-lg">
-                    <Building2 className="h-5 w-5 text-primary" />
+      {isLoading ? (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <p className="text-muted-foreground">Загрузка банков...</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredBanks.map((bank) => (
+            <Card key={bank.id} className="stat-card">
+              <CardHeader className="pb-4">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-primary/10 rounded-lg">
+                      <Building2 className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg">{bank.name}</CardTitle>
+                      <p className="text-sm text-muted-foreground">{bank.code}</p>
+                    </div>
                   </div>
-                  <div>
-                    <CardTitle className="text-lg">{bank.name}</CardTitle>
-                    <p className="text-sm text-muted-foreground">{bank.code}</p>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleEdit(bank)}
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDelete(bank.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleEdit(bank)}
-                  >
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(bank.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {bank.swift && (
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="font-medium">SWIFT:</span>
-                  <span className="font-mono">{bank.swift}</span>
-                </div>
-              )}
-              
-              {bank.address && (
-                <div className="flex items-start gap-2 text-sm">
-                  <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                  <span>{bank.address}</span>
-                </div>
-              )}
-              
-              {bank.phone && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Phone className="h-4 w-4 text-muted-foreground" />
-                  <span>{bank.phone}</span>
-                </div>
-              )}
-              
-              {bank.website && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Globe className="h-4 w-4 text-muted-foreground" />
-                  <a 
-                    href={bank.website} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    Веб-сайт
-                  </a>
-                </div>
-              )}
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {bank.country && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-medium">Страна:</span>
+                    <span>{bank.country}</span>
+                  </div>
+                )}
+                
+                {bank.currency_code && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-medium">Валюта:</span>
+                    <span className="font-mono">{bank.currency_code}</span>
+                  </div>
+                )}
+                
+                {bank.contact_info && (
+                  <div className="flex flex-col gap-1 text-sm">
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <span className="font-medium">Контакты:</span>
+                    </div>
+                    <div className="ml-6 space-y-1">
+                      {typeof bank.contact_info === 'string' ? (
+                        <span>{bank.contact_info}</span>
+                      ) : (
+                        <>
+                          {bank.contact_info.phone && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground">Телефон:</span>
+                              <span>{bank.contact_info.phone}</span>
+                            </div>
+                          )}
+                          {bank.contact_info.website && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground">Сайт:</span>
+                              <span>{bank.contact_info.website}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                {bank.notes && (
+                  <div className="flex items-start gap-2 text-sm">
+                    <span className="font-medium">Заметки:</span>
+                    <span className="text-muted-foreground">{bank.notes}</span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
-              <div className="pt-3 border-t border-border/50">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <p className="text-muted-foreground">Кредитов</p>
-                    <p className="font-semibold text-primary">{bank.creditsCount}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground">Сумма</p>
-                    <p className="font-semibold financial-amount">
-                      {(bank.totalAmount / 1000).toFixed(0)}K MDL
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {filteredBanks.length === 0 && (
+      {!isLoading && filteredBanks.length === 0 && (
         <Card>
           <CardContent className="p-12 text-center">
             <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />

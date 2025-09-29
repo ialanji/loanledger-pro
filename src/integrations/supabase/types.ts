@@ -265,6 +265,156 @@ export type Database = {
           },
         ]
       }
+      import_logs: {
+        Row: {
+          id: string
+          source: string
+          run_id: string
+          started_at: string
+          finished_at: string | null
+          status: string
+          rows_imported: number | null
+          error: string | null
+          details: Json | null
+        }
+        Insert: {
+          id?: string
+          source: string
+          run_id: string
+          started_at?: string
+          finished_at?: string | null
+          status?: string
+          rows_imported?: number | null
+          error?: string | null
+          details?: Json | null
+        }
+        Update: {
+          id?: string
+          source?: string
+          run_id?: string
+          started_at?: string
+          finished_at?: string | null
+          status?: string
+          rows_imported?: number | null
+          error?: string | null
+          details?: Json | null
+        }
+        Relationships: []
+      }
+      import_cursors: {
+        Row: {
+          id: string
+          source: string
+          last_row_index: number | null
+          last_date: string | null
+          last_run_at: string | null
+          cursor: Json | null
+        }
+        Insert: {
+          id?: string
+          source: string
+          last_row_index?: number | null
+          last_date?: string | null
+          last_run_at?: string | null
+          cursor?: Json | null
+        }
+        Update: {
+          id?: string
+          source?: string
+          last_row_index?: number | null
+          last_date?: string | null
+          last_run_at?: string | null
+          cursor?: Json | null
+        }
+        Relationships: []
+      }
+      dept_aliases: {
+        Row: {
+          id: string
+          raw: string
+          canonical: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          raw: string
+          canonical: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          raw?: string
+          canonical?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      supplier_aliases: {
+        Row: {
+          id: string
+          raw: string
+          canonical: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          raw: string
+          canonical: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          raw?: string
+          canonical?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      expenses: {
+        Row: {
+          id: string
+          source: string
+          date: string
+          amount: number
+          currency: string
+          department: string | null
+          supplier: string | null
+          category: string
+          description: string | null
+          meta: Json | null
+          row_hash: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          source: string
+          date: string
+          amount: number
+          currency?: string
+          department?: string | null
+          supplier?: string | null
+          category: string
+          description?: string | null
+          meta?: Json | null
+          row_hash: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          source?: string
+          date?: string
+          amount?: number
+          currency?: string
+          department?: string | null
+          supplier?: string | null
+          category?: string
+          description?: string | null
+          meta?: Json | null
+          row_hash?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

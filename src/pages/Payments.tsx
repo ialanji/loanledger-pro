@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -11,48 +11,13 @@ import {
   CheckCircle,
   Clock,
   AlertTriangle,
-  XCircle 
+  XCircle,
+  Trash2
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/utils/formatters';
+import { toast } from 'sonner';
 
-// Mock data
-const mockPayments = [
-  {
-    id: '1',
-    creditId: 'CR-001',
-    contractNumber: 'CRD-2024-001',
-    periodNumber: 1,
-    dueDate: new Date('2024-01-15'),
-    principalDue: 8500.00,
-    interestDue: 1000.00,
-    totalDue: 9500.00,
-    status: 'paid' as const,
-    paidAmount: 9500.00,
-    paidAt: new Date('2024-01-15')
-  },
-  {
-    id: '2',
-    creditId: 'CR-001',
-    contractNumber: 'CRD-2024-001',
-    periodNumber: 2,
-    dueDate: new Date('2024-02-15'),
-    principalDue: 8570.25,
-    interestDue: 929.75,
-    totalDue: 9500.00,
-    status: 'pending' as const
-  },
-  {
-    id: '3',
-    creditId: 'CR-002',
-    contractNumber: 'CRD-2024-002',
-    periodNumber: 1,
-    dueDate: new Date('2024-01-20'),
-    principalDue: 12000.00,
-    interestDue: 1500.00,
-    totalDue: 13500.00,
-    status: 'overdue' as const
-  }
-];
+// (данные загружаются из API /api/payments)
 
 const statusConfig = {
   paid: { label: 'Оплачен', icon: CheckCircle, variant: 'default' as const, color: 'text-success' },
@@ -62,19 +27,141 @@ const statusConfig = {
   canceled: { label: 'Отменен', icon: XCircle, variant: 'outline' as const, color: 'text-muted-foreground' }
 };
 
+// Приведение статусов БД к статусам UI
+function normalizeStatus(status?: string) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'scheduled') return 'pending';
+  if (s === 'cancelled' || s === 'canceled') return 'canceled';
+  if (s === 'partial') return 'partial';
+  if (s === 'overdue') return 'overdue';
+  if (s === 'paid') return 'paid';
+  return 'pending';
+}
+
 export default function Payments() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'overdue'>('all');
+  const [payments, setPayments] = useState<Array<{
+    id: string | number;
+    contractNumber: string;
+    periodNumber: number;
+    dueDate: Date;
+    principalDue: number;
+    interestDue: number;
+    totalDue: number;
+    status: keyof typeof statusConfig;
+    paidAt?: Date | null;
+  }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredPayments = mockPayments.filter(payment => {
+  useEffect(() => {
+    let ignore = false;
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await fetch('/api/payments');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (ignore) return;
+        const normalized = (Array.isArray(data) ? data : []).map((row: any) => ({
+          id: row.id,
+          contractNumber: row.contract_number || '',
+          periodNumber: Number(row.period_number ?? 0),
+          dueDate: row.due_date ? new Date(row.due_date) : new Date(),
+          principalDue: Number(row.principal_due ?? row.principalDue ?? 0),
+          interestDue: Number(row.interest_due ?? row.interestDue ?? 0),
+          totalDue: Number(row.total_due ?? row.totalDue ?? 0),
+          status: normalizeStatus(row.status) as keyof typeof statusConfig,
+          paidAt: row.paid_at ? new Date(row.paid_at) : null,
+        }));
+        setPayments(normalized);
+      } catch (e: any) {
+        setError(e?.message || 'Не удалось загрузить платежи');
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    };
+    load();
+    return () => { ignore = true };
+  }, []);
+
+  const filteredPayments = payments.filter((payment) => {
     const matchesSearch = payment.contractNumber.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || payment.status === statusFilter;
+    const matchesStatus =
+      statusFilter === 'all'
+        ? true
+        : statusFilter === 'pending'
+          ? payment.status === 'pending' || payment.status === 'partial'
+          : statusFilter === 'overdue'
+            ? payment.status === 'overdue'
+            : true;
     return matchesSearch && matchesStatus;
   });
 
-  const handlePayment = (paymentId: string) => {
-    console.log('Processing payment:', paymentId);
-    // TODO: Implement payment processing
+  // Подсчеты для карточек статистики
+  const paidTotal = payments
+    .filter(p => p.status === 'paid')
+    .reduce((sum, p) => sum + (p.totalDue || 0), 0);
+  // Сумма оплаченного основного долга (вместо "Ожидает")
+  const paidPrincipalTotal = payments
+    .filter(p => p.status === 'paid')
+    .reduce((sum, p) => sum + (p.principalDue || 0), 0);
+  // Сумма оплаченных процентов (вместо "Просрочено")
+  const paidInterestTotal = payments
+    .filter(p => p.status === 'paid')
+    .reduce((sum, p) => sum + (p.interestDue || 0), 0);
+  const totalTotal = payments.reduce((sum, p) => sum + (p.totalDue || 0), 0);
+
+  const handlePayment = async (paymentId: string | number) => {
+    try {
+      const target = payments.find(p => p.id === paymentId);
+      if (!target) {
+        toast.error('Платеж не найден');
+        return;
+      }
+      // Отправляем подтверждение оплаты на сервер (полная оплата на сумму totalDue)
+      const res = await fetch(`/api/payments/${paymentId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'paid', paidAmount: target.totalDue })
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const updated = await res.json();
+      // Обновляем локальное состояние, чтобы UI сразу отразил оплату
+      setPayments(prev => prev.map(p => (
+        p.id === paymentId
+          ? {
+              ...p,
+              status: 'paid',
+              paidAt: updated?.paid_at ? new Date(updated.paid_at) : new Date(),
+            }
+          : p
+      )));
+      toast.success('Платеж подтвержден');
+    } catch (e: any) {
+      console.error('Payment confirm error:', e);
+      toast.error('Не удалось подтвердить платеж');
+    }
+  };
+
+  const handleDeletePayment = async (paymentId: string | number) => {
+    if (!confirm('Вы уверены, что хотите удалить этот платеж?')) return;
+    try {
+      const res = await fetch(`/api/payments/${paymentId}` , { method: 'DELETE' });
+      if (!res.ok && res.status !== 204) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      // Успех: оптимистично удаляем из состояния
+      setPayments(prev => prev.filter(p => p.id !== paymentId));
+      toast.success('Платеж успешно удален');
+    } catch (e: any) {
+      toast.error('Ошибка при удалении платежа');
+      console.error('Delete payment error:', e);
+    }
   };
 
   return (
@@ -98,7 +185,7 @@ export default function Payments() {
               <div className="ml-4">
                 <p className="text-sm font-medium text-muted-foreground">Оплачено</p>
                 <p className="text-2xl font-bold financial-amount positive">
-                  {formatCurrency(9500.00)}
+                  {formatCurrency(paidTotal)}
                 </p>
               </div>
             </div>
@@ -112,9 +199,9 @@ export default function Payments() {
                 <Clock className="h-4 w-4 text-warning" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-muted-foreground">Ожидает</p>
+                <p className="text-sm font-medium text-muted-foreground">Основной долг</p>
                 <p className="text-2xl font-bold">
-                  {formatCurrency(9500.00)}
+                  {formatCurrency(paidPrincipalTotal)}
                 </p>
               </div>
             </div>
@@ -128,9 +215,9 @@ export default function Payments() {
                 <XCircle className="h-4 w-4 text-destructive" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-muted-foreground">Просрочено</p>
+                <p className="text-sm font-medium text-muted-foreground">Проценты</p>
                 <p className="text-2xl font-bold financial-amount negative">
-                  {formatCurrency(13500.00)}
+                  {formatCurrency(paidInterestTotal)}
                 </p>
               </div>
             </div>
@@ -146,7 +233,7 @@ export default function Payments() {
               <div className="ml-4">
                 <p className="text-sm font-medium text-muted-foreground">Всего</p>
                 <p className="text-2xl font-bold">
-                  {formatCurrency(32500.00)}
+                  {formatCurrency(totalTotal)}
                 </p>
               </div>
             </div>
@@ -241,18 +328,39 @@ export default function Payments() {
                       </td>
                       <td>
                         {payment.status === 'pending' || payment.status === 'overdue' ? (
-                          <Button
-                            size="sm"
-                            onClick={() => handlePayment(payment.id)}
-                            className="btn-corporate"
-                          >
-                            Оплатить
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => handlePayment(payment.id)}
+                              className="btn-corporate"
+                            >
+                              Оплатить
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleDeletePayment(payment.id)}
+                              className="gap-1"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              Удалить
+                            </Button>
+                          </div>
                         ) : payment.status === 'paid' ? (
                           <span className="text-sm text-success">
                             Оплачено {payment.paidAt && formatDate(payment.paidAt)}
                           </span>
-                        ) : null}
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => handleDeletePayment(payment.id)}
+                            className="gap-1"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            Удалить
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );

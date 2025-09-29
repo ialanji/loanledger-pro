@@ -272,265 +272,138 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Общая информация по кредитам */}
-      <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
-            <DollarSign className="w-5 h-5" />
-            Общая информация по кредитам
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Общая сумма кредита */}
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
-                ОБЩАЯ СУММА КРЕДИТА
-              </p>
-              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
-                {formatCurrency(stats.totalPrincipal).replace('MDL', '₽')}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {stats.totalCredits} кредит в {stats.activeCredits} банках
-              </p>
-            </div>
-
-            {/* Остаток долга */}
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
-                ОСТАТОК ДОЛГА
-              </p>
-              <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
-                {formatCurrency(stats.remainingPrincipal).replace('MDL', '₽')}
-              </p>
-              <p className="text-xs text-blue-500">
-                ✓ {((stats.remainingPrincipal / stats.totalPrincipal) * 100).toFixed(1)}% от общей суммы
-              </p>
-            </div>
-
-            {/* Прогресс погашения */}
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
-                ПРОГРЕСС ПОГАШЕНИЯ
-              </p>
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-2xl font-bold text-green-500">
-                  {((stats.totalPaid / stats.totalPrincipal) * 100).toFixed(1)}%
-                </span>
+      {/* Верхний ряд: Общая информация по кредитам и Платеж в текущем месяце */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* Общая информация по кредитам */}
+        <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+              <DollarSign className="w-5 h-5" />
+              Общая информация по кредитам
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Общая сумма кредита */}
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                  ОБЩАЯ СУММА КРЕДИТА
+                </p>
+                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
+                  {formatCurrency(stats.totalPrincipal).replace('MDL', '₽')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {stats.totalCredits} кредит в {stats.activeCredits} банках
+                </p>
               </div>
-              <p className="text-xs text-muted-foreground mb-3">
-                Выплачено основного долга
-              </p>
-              <Progress value={(stats.totalPaid / stats.totalPrincipal) * 100} className="h-2" />
-            </div>
 
-            {/* Структура остатка - Donut Chart */}
-            <div className="flex flex-col items-center">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-4 self-start">
-                СТРУКТУРА ОСТАТКА
-              </p>
-              <div className="relative w-32 h-32">
-                <svg className="w-32 h-32 transform -rotate-90" viewBox="0 0 100 100">
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="40"
-                    stroke="currentColor"
-                    strokeWidth="8"
-                    fill="none"
-                    className="text-blue-500"
-                  />
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="40"
-                    stroke="currentColor"
-                    strokeWidth="8"
-                    fill="none"
-                    strokeDasharray="5 246"
-                    className="text-orange-500"
-                  />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-lg font-bold">
-                    {formatCurrency(stats.remainingPrincipal + stats.projectedInterest).replace('MDL', '₽')}
-                  </span>
-                  <span className="text-xs text-muted-foreground">общий остаток</span>
-                </div>
+              {/* Остаток долга */}
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                  ОСТАТОК ДОЛГА
+                </p>
+                <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
+                  {formatCurrency(stats.remainingPrincipal).replace('MDL', '₽')}
+                </p>
+                <p className="text-xs text-blue-500">
+                  ✓ {((stats.remainingPrincipal / stats.totalPrincipal) * 100).toFixed(1)}% от общей суммы
+                </p>
               </div>
-              <div className="mt-4 space-y-1 text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                  <span>Основной долг</span>
-                  <span className="ml-auto font-medium">
-                    {formatCurrency(stats.remainingPrincipal).replace('MDL', '₽')}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-                  <span>Проценты</span>
-                  <span className="ml-auto font-medium">
-                    {formatCurrency(stats.projectedInterest).replace('MDL', '₽')}
-                  </span>
-                </div>
+
+              {/* Проценты (Остаток Проценты) */}
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                  ПРОЦЕНТЫ
+                </p>
+                <p className="text-2xl font-bold text-orange-500 mb-1">
+                  {formatCurrency(stats.projectedInterest).replace('MDL', '₽')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Остаток процентов к доплате
+                </p>
               </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      {/* Платеж в текущем месяце */}
-      <Card className="bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/20 dark:to-red-950/20 border-orange-200 dark:border-orange-800">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-300">
-            <Calendar className="w-5 h-5" />
-            Платеж в текущем месяце
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Платеж в текущем месяце */}
-            <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
-                ПЛАТЕЖ В ТЕКУЩЕМ МЕСЯЦЕ
-              </p>
-              <p className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-4">
-                {formatCurrency(stats.thisMonthDue).replace('MDL', '₽')}
-              </p>
-              <div className="space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span>Плановый:</span>
-                  <span className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium">
-                    {formatCurrency(stats.thisMonthDue).replace('MDL', '₽')}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Фактический:</span>
-                  <span className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium">
-                    {formatCurrency(stats.totalPaid).replace('MDL', '₽')}
-                  </span>
-                </div>
-                <div className="text-center pt-2">
-                  <span className="text-sm font-medium">
-                    {stats.thisMonthDue > 0 ? 'Ожидается' : 'Нет платежей'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Платеж основного долга */}
-            <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
-                ПЛАТЕЖ ОСНОВНОГО ДОЛГА
-              </p>
-              <p className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-4">
-                {formatCurrency(stats.thisMonthPrincipal || 0).replace('MDL', '₽')}
-              </p>
-              <div className="space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span>Остаток долга:</span>
-                  <span className="font-medium text-blue-600">
-                    {formatCurrency(stats.remainingPrincipal).replace('MDL', '₽')}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Доля в платеже:</span>
-                  <span className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium">
-                    {stats.thisMonthDue > 0 ? 
-                      ((stats.thisMonthPrincipal / stats.thisMonthDue) * 100).toFixed(1) + '%' : 
-                      '0%'
-                    }
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Платеж процентов */}
-            <div className="bg-white dark:bg-gray-900 rounded-lg p-6 border">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
-                ПЛАТЕЖ ПРОЦЕНТОВ
-              </p>
-              <p className="text-3xl font-bold text-red-500 mb-4">
-                {formatCurrency(stats.thisMonthInterest || 0).replace('MDL', '₽')}
-              </p>
-              <div className="space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span>К доплате:</span>
-                  <span className="font-medium text-red-500">
-                    {formatCurrency(stats.projectedInterest).replace('MDL', '₽')}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Доля в платеже:</span>
-                  <span className="bg-red-500 text-white px-2 py-1 rounded text-xs font-medium">
-                    {stats.thisMonthDue > 0 ? 
-                      ((stats.thisMonthInterest / stats.thisMonthDue) * 100).toFixed(1) + '%' : 
-                      '0%'
-                    }
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Ближайшие платежи */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Calendar className="w-5 h-5" />
-            Ближайшие платежи
-          </CardTitle>
-          <CardDescription>
-            Предстоящие платежи в ближайшие 30 дней
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {upcomingPayments.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>Нет предстоящих платежей</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {upcomingPayments.map((payment) => (
-                <div key={payment.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 rounded-full ${
-                      payment.status === 'overdue' ? 'bg-red-500' :
-                      payment.status === 'pending' ? 'bg-yellow-500' :
-                      'bg-green-500'
-                    }`} />
-                    <div>
-                      <p className="font-medium">
-                        Кредит #{payment.creditId}
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        Срок: {new Date(payment.dueDate).toLocaleDateString('ru-RU')}
-                      </p>
-                    </div>
+        {/* Платеж в текущем месяце */}
+        <Card className="bg-gradient-to-br from-orange-50 to-red-50 dark:from-orange-950/20 dark:to-red-950/20 border-orange-200 dark:border-orange-800">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-300">
+              <Calendar className="w-5 h-5" />
+              Платеж в текущем месяце
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Платеж в текущем месяце */}
+              <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                  ПЛАТЕЖ В ТЕКУЩЕМ МЕСЯЦЕ
+                </p>
+                <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mb-3">
+                  {formatCurrency(stats.thisMonthDue).replace('MDL', '₽')}
+                </p>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span>Плановый:</span>
+                    <span className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium">
+                      {formatCurrency(stats.thisMonthDue).replace('MDL', '₽')}
+                    </span>
                   </div>
-                  <div className="text-right">
-                    <p className="font-medium">
-                      {formatCurrency(payment.amount).replace('MDL', '₽')}
-                    </p>
-                    <Badge variant={
-                      payment.status === 'overdue' ? 'destructive' :
-                      payment.status === 'pending' ? 'secondary' :
-                      'default'
-                    }>
-                      {payment.status === 'overdue' ? 'Просрочен' :
-                       payment.status === 'pending' ? 'Ожидается' :
-                       'Выполнен'}
-                    </Badge>
+                  <div className="text-center pt-1">
+                    <span className="text-xs font-medium">
+                      {stats.thisMonthDue > 0 ? 'Ожидается' : 'Нет платежей'}
+                    </span>
                   </div>
                 </div>
-              ))}
+              </div>
+
+              {/* Платеж основного долга */}
+              <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                  ПЛАТЕЖ ОСНОВНОГО ДОЛГА
+                </p>
+                <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mb-3">
+                  {formatCurrency(stats.thisMonthPrincipal || 0).replace('MDL', '₽')}
+                </p>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span>Доля в платеже:</span>
+                    <span className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium">
+                      {stats.thisMonthDue > 0 ? 
+                        ((stats.thisMonthPrincipal / stats.thisMonthDue) * 100).toFixed(1) + '%' : 
+                        '0%'
+                      }
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Платеж процентов */}
+              <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
+                  ПЛАТЕЖ ПРОЦЕНТОВ
+                </p>
+                <p className="text-xl font-bold text-red-500 mb-3">
+                  {formatCurrency(stats.thisMonthInterest || 0).replace('MDL', '₽')}
+                </p>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span>Доля в платеже:</span>
+                    <span className="bg-red-500 text-white px-2 py-1 rounded text-xs font-medium">
+                      {stats.thisMonthDue > 0 ? 
+                        ((stats.thisMonthInterest / stats.thisMonthDue) * 100).toFixed(1) + '%' : 
+                        '0%'
+                      }
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

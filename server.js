@@ -1421,6 +1421,53 @@ app.get('/api/credits/:id/payments', async (req, res) => {
   }
 });
 
+// Debug endpoint to check credit_payment table
+app.get('/api/debug/credit_payment/:creditId', async (req, res) => {
+  try {
+    const { creditId } = req.params;
+    const query = `
+      SELECT 
+        id, credit_id, period_number, due_date, 
+        principal_due, interest_due, total_due, 
+        status, paid_amount, paid_at
+      FROM credit_payment 
+      WHERE credit_id = $1 
+      ORDER BY period_number ASC
+    `;
+    const result = await pool.query(query, [creditId]);
+    res.json({
+      count: result.rows.length,
+      payments: result.rows
+    });
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Debug endpoint to check payments table
+app.get('/api/debug/payments/:creditId', async (req, res) => {
+  try {
+    const { creditId } = req.params;
+    const query = `
+      SELECT 
+        id, credit_id, amount, 
+        payment_date, created_at, updated_at
+      FROM payments 
+      WHERE credit_id = $1 
+      ORDER BY payment_date ASC
+    `;
+    const result = await pool.query(query, [creditId]);
+    res.json({
+      count: result.rows.length,
+      payments: result.rows
+    });
+  } catch (error) {
+    console.error('Debug payments endpoint error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Additional payment endpoints
 
 // GET /api/payments - List all payments (optionally filter by status or creditId)
@@ -1588,10 +1635,13 @@ app.get('/api/credits/by-contract/:contractNumber/schedule', async (req, res) =>
 // GET /api/credits/:id/payments/unprocessed - List unprocessed payments for a credit
 app.get('/api/credits/:id/payments/unprocessed', async (req, res) => {
   try {
+    console.log('=== ENDPOINT START: Unprocessed payments request ===');
     const { id } = req.params;
+    console.log('Unprocessed payments request for credit ID:', id);
     // Фильтруем только неоплаченные платежи до текущего месяца
     const now = new Date();
     const endOfCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    console.log('End of current month:', endOfCurrentMonth.toISOString().slice(0, 10));
     
     // Сначала пытаемся получить существующие платежи
     const existingQuery = `
@@ -1616,12 +1666,60 @@ app.get('/api/credits/:id/payments/unprocessed', async (req, res) => {
       if (result.rows.length > 0) {
         return res.json(result.rows);
       }
+      
+      // Если нет неоплаченных платежей, проверим есть ли записи в credit_payment
+      // и сколько периодов должно быть до текущего месяца
+      const allPaymentsQuery = `
+        SELECT period_number, status, due_date
+        FROM credit_payment
+        WHERE credit_id = $1
+        AND due_date <= $2
+        ORDER BY period_number ASC
+      `;
+      const allPaymentsResult = await pool.query(allPaymentsQuery, [id, endOfCurrentMonth.toISOString().slice(0, 10)]);
+      
+      if (allPaymentsResult.rows.length > 0) {
+        // Есть записи в credit_payment для периодов до текущего месяца
+        // Проверим, все ли они оплачены
+        const unpaidCount = allPaymentsResult.rows.filter(p => 
+          !['paid', 'completed'].includes(p.status.toLowerCase())
+        ).length;
+        
+        if (unpaidCount === 0) {
+          // Все платежи до текущего месяца оплачены - возвращаем пустой массив
+          return res.json([]);
+        }
+      }
     } catch (tableError) {
       // Таблица может не существовать, продолжаем с генерацией из графика
-      console.log('credit_payment table not found, generating from schedule');
+      console.log('Error querying credit_payment table:', tableError.message);
+      console.log('Continuing with schedule generation');
     }
     
     // Если нет существующих платежей, генерируем через ScheduleEngine
+    // Но сначала получаем все существующие платежи (включая оплаченные) для исключения из списка
+    const allExistingPaymentsQuery = `
+      SELECT period_number, status
+      FROM credit_payment
+      WHERE credit_id = $1
+    `;
+    let existingPeriods = new Set();
+    try {
+      const allPaymentsResult = await pool.query(allExistingPaymentsQuery, [id]);
+      existingPeriods = new Set(
+        allPaymentsResult.rows
+          .filter(p => p.status !== 'cancelled') // Не исключаем отмененные платежи
+          .map(p => p.period_number)
+      );
+    } catch (error) {
+      console.log('=== ERROR IN CREDIT_PAYMENT QUERY ===');
+      console.log('Error message:', error.message);
+      console.log('Error stack:', error.stack);
+      console.log('Query was:', allExistingPaymentsQuery);
+      console.log('Credit ID:', creditId);
+      console.log('Could not fetch existing payments from credit_payment table:', error.message);
+    }
+
     const creditQuery = `
       SELECT c.*, b.name as bank_name 
       FROM credits c 
@@ -1685,18 +1783,29 @@ app.get('/api/credits/:id/payments/unprocessed', async (req, res) => {
     }
 
     const scheduleResponse = ScheduleEngine.generatePaymentScheduleResponse(creditData, rates, adjustments);
-    const items = (scheduleResponse.schedule || []).filter(i => i.dueDate <= endOfCurrentMonth);
+    const items = (scheduleResponse.schedule || [])
+      .filter(i => i.dueDate <= endOfCurrentMonth)
+      .filter(i => !existingPeriods.has(i.periodNumber)); // Исключаем периоды с существующими платежами
 
-    const unprocessedPeriods = items.map(i => ({
-      id: null,
-      credit_id: parseInt(id),
-      period_number: i.periodNumber,
-      due_date: i.dueDate,
-      principal_due: Math.round((i.principalDue || 0) * 100) / 100,
-      interest_due: Math.round((i.interestDue || 0) * 100) / 100,
-      total_due: Math.round((i.totalDue || 0) * 100) / 100,
-      status: 'scheduled'
-    }));
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    
+    const unprocessedPeriods = items.map(i => {
+      const dueDate = new Date(i.dueDate);
+      const dueDateStart = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+      const status = dueDateStart < todayStart ? 'overdue' : 'scheduled';
+      
+      return {
+        id: null,
+        credit_id: parseInt(id),
+        period_number: i.periodNumber,
+        due_date: i.dueDate,
+        principal_due: Math.round((i.principalDue || 0) * 100) / 100,
+        interest_due: Math.round((i.interestDue || 0) * 100) / 100,
+        total_due: Math.round((i.totalDue || 0) * 100) / 100,
+        status: status
+      };
+    });
 
     res.json(unprocessedPeriods);
   } catch (error) {

@@ -26,6 +26,7 @@ export default function ManualPaymentCalculation() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
 
   useEffect(() => {
@@ -99,6 +100,7 @@ export default function ManualPaymentCalculation() {
       });
 
       setUnprocessedPeriods(periodsWithStatus);
+      setHasLoadedOnce(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Ошибка при загрузке непроведённых периодов');
     } finally {
@@ -394,7 +396,11 @@ export default function ManualPaymentCalculation() {
           {unprocessedPeriods.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Calculator className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>Нажмите "Рассчитать" для генерации платёжных периодов</p>
+              {hasLoadedOnce ? (
+                <p>Все платежи уже рассчитаны и проведены</p>
+              ) : (
+                <p>Нажмите "Рассчитать" для генерации платёжных периодов</p>
+              )}
             </div>
           ) : (
             <div className="overflow-x-auto">

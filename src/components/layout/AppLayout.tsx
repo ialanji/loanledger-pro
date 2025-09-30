@@ -193,11 +193,11 @@ export default function AppLayout({ children }: AppLayoutProps) {
               <div className="space-y-1">
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">К оплате:</span>
-                  <span className="font-mono font-semibold">125,000 MDL</span>
+                  <span className="font-mono font-semibold">0 MDL</span>
                 </div>
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Активных:</span>
-                  <span className="font-semibold text-primary">24</span>
+                  <span className="font-semibold text-primary">0</span>
                 </div>
               </div>
             </div>
@@ -235,7 +235,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             </div>
             <div className="text-right">
               <p className="text-sm font-medium"></p>
-              <p className="text-xs text-muted-foreground">Система учёта кредитов</p>
+              <p className="text-xs text-muted-foreground">Система учёта финансов</p>
             </div>
           </div>
         </header>

@@ -373,7 +373,11 @@ export default function Reports() {
               className={`cursor-pointer transition-all ${
                 selectedReport === report.id ? 'ring-2 ring-primary border-primary/50' : 'hover:shadow-md'
               }`}
-              onClick={() => setSelectedReport(report.id)}
+              onClick={() => {
+                setSelectedReport(report.id);
+                setReportData(null);
+                setError(null);
+              }}
             >
               <CardContent className="p-6">
                 <div className="flex items-start gap-3">

@@ -1,7 +1,7 @@
 # LoanLedger Pro - Build Status & Implementation Progress
 
 ## Project Overview
-LoanLedger Pro is a comprehensive financial management system for Moldova Financial, featuring credit management, expense tracking, and automated data import capabilities.
+LoanLedger Pro is a comprehensive financial management system, featuring credit management, expense tracking, and automated data import capabilities.
 
 ## Current Build Status: ✅ COMPLETED
 

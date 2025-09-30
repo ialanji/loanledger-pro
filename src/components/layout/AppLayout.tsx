@@ -110,7 +110,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
               </div>
               <div>
                 <h1 className="text-lg font-bold text-foreground">NANU Financial System</h1>
-                <p className="text-xs text-muted-foreground">Moldova Financial</p>
+                <p className="text-xs text-muted-foreground"></p>
               </div>
             </div>
             <Button 
@@ -234,7 +234,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
               </span>
             </div>
             <div className="text-right">
-              <p className="text-sm font-medium">Moldova Financial</p>
+              <p className="text-sm font-medium"></p>
               <p className="text-xs text-muted-foreground">Система учёта кредитов</p>
             </div>
           </div>

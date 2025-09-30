@@ -109,7 +109,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 <Calculator className="w-4 h-4 text-primary-foreground" />
               </div>
               <div>
-                <h1 className="text-lg font-bold text-foreground">Credit System</h1>
+                <h1 className="text-lg font-bold text-foreground">NANU Financial System</h1>
                 <p className="text-xs text-muted-foreground">Moldova Financial</p>
               </div>
             </div>

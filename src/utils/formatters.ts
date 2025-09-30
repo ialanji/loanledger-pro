@@ -1,5 +1,5 @@
 /**
- * Utility functions for formatting values in the Credit System
+ * Utility functions for formatting values in the NANU Financial System
  */
 
 /**

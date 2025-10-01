@@ -2623,30 +2623,27 @@ app.get('/api/reports/overdue', async (req, res) => {
 });
 
 app.get('/api/reports/forecast', async (req, res) => {
+  console.log('[FORECAST DEBUG] ===== FORECAST ENDPOINT HIT =====');
+  console.log('[FORECAST DEBUG] Endpoint hit with query:', req.query);
+  console.log('[FORECAST DEBUG] Request timestamp:', new Date().toISOString());
   try {
-    const { dateFrom, dateTo, bankId } = req.query;
+    const { bankId } = req.query;
     
-    // Получаем все активные кредиты с их графиками
+    // Получаем активные кредиты
     let query = `
       SELECT 
         c.id,
         c.contract_number,
         c.principal,
-        c.start_date,
         c.term_months,
+        c.start_date,
+        c.method,
+        c.deferment_months,
         c.payment_day,
-        b.name as bank_name,
-        COALESCE(cr.rate, c.initial_rate) as current_rate
+        b.name as bank_name
       FROM credits c
       LEFT JOIN banks b ON c.bank_id = b.id
-      LEFT JOIN credit_rates cr ON c.id = cr.credit_id 
-        AND cr.effective_date = (
-          SELECT MAX(effective_date) 
-          FROM credit_rates 
-          WHERE credit_id = c.id 
-          AND effective_date <= CURRENT_DATE
-        )
-      WHERE 1=1
+      WHERE c.principal > 0
     `;
     
     const params = [];
@@ -2660,46 +2657,122 @@ app.get('/api/reports/forecast', async (req, res) => {
     
     const result = await pool.query(query, params);
     
-    // Генерируем прогноз на следующие 3 месяца
+    // Генерируем детальный прогноз на следующие 12 месяцев используя реальный график платежей
     const now = new Date();
-    const forecastMonths = [];
+    const forecastItems = [];
     
-    for (let i = 0; i < 3; i++) {
-      const month = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      const monthStr = month.toISOString().substring(0, 7);
-      
-      let monthlyAmount = 0;
-      let paymentCount = 0;
-      
-      result.rows.forEach(credit => {
-        // Простой расчет ежемесячного платежа (аннуитет)
-        const rate = parseFloat(credit.current_rate) / 100 / 12;
-        const principal = parseFloat(credit.principal);
-        const termMonths = credit.term_months;
+    for (const credit of result.rows) {
+      try {
+        // Получаем ставки для кредита
+        const ratesQuery = `
+          SELECT rate, effective_date 
+          FROM credit_rates 
+          WHERE credit_id = $1 
+          ORDER BY effective_date ASC
+        `;
+        const ratesResult = await pool.query(ratesQuery, [credit.id]);
+        const rates = ratesResult.rows.map(row => ({
+          annualPercent: parseFloat(row.rate) * 100,
+          effectiveDate: new Date(row.effective_date)
+        }));
         
-        if (rate > 0) {
-          const monthlyPayment = principal * (rate * Math.pow(1 + rate, termMonths)) / (Math.pow(1 + rate, termMonths) - 1);
-          monthlyAmount += monthlyPayment;
-          paymentCount++;
+        // Получаем корректировки (если есть)
+        const adjustmentsQuery = `
+          SELECT amount, adjustment_date 
+          FROM principal_adjustments 
+          WHERE credit_id = $1 
+          ORDER BY adjustment_date ASC
+        `;
+        const adjustmentsResult = await pool.query(adjustmentsQuery, [credit.id]);
+        const adjustments = adjustmentsResult.rows.map(row => ({
+          amount: parseFloat(row.amount),
+          effectiveDate: new Date(row.adjustment_date)
+        }));
+        
+        // Подготавливаем данные кредита для ScheduleEngine
+        const creditData = {
+          id: credit.id,
+          principal: parseFloat(credit.principal),
+          termMonths: credit.term_months,
+          startDate: new Date(credit.start_date),
+          method: credit.method,
+          defermentMonths: credit.deferment_months || 0,
+          paymentDay: credit.payment_day
+        };
+        
+        // Получаем уже оплаченные платежи для этого кредита
+        const paidPaymentsQuery = `
+          SELECT period_number, status, payment_date
+          FROM credit_payment 
+          WHERE credit_id = $1 AND status = 'paid'
+        `;
+        const paidPaymentsResult = await pool.query(paidPaymentsQuery, [credit.id]);
+        const paidPeriods = new Set(paidPaymentsResult.rows.map(row => row.period_number));
+        
+        console.log(`[FORECAST DEBUG] Credit ${credit.contract_number} paid periods:`, Array.from(paidPeriods));
+        
+        // Генерируем график платежей используя ScheduleEngine
+        const scheduleResponse = ScheduleEngine.generatePaymentScheduleResponse(
+          creditData,
+          rates,
+          adjustments
+        );
+        
+        console.log(`[FORECAST DEBUG] Credit ${credit.contract_number} schedule generated:`, {
+          scheduleLength: scheduleResponse.schedule.length,
+          firstPayment: scheduleResponse.schedule[0],
+          seventhPayment: scheduleResponse.schedule.find(p => p.periodNumber === 7),
+          paidPeriodsCount: paidPeriods.size
+        });
+        
+        // Извлекаем платежи для следующих 12 месяцев
+        for (let i = 0; i < 12; i++) {
+          const targetMonth = new Date(now.getFullYear(), now.getMonth() + i, 1);
+          const monthStr = targetMonth.toISOString().substring(0, 7);
+          
+          // Находим платеж, который должен быть в этом месяце
+          const monthPayment = scheduleResponse.schedule.find(payment => {
+            const paymentDate = new Date(payment.dueDate);
+            return paymentDate.getFullYear() === targetMonth.getFullYear() && 
+                   paymentDate.getMonth() === targetMonth.getMonth();
+          });
+          
+          console.log(`[FORECAST DEBUG] Month ${monthStr} for credit ${credit.contract_number}:`, {
+            targetMonth: targetMonth,
+            foundPayment: monthPayment ? {
+              periodNumber: monthPayment.periodNumber,
+              dueDate: monthPayment.dueDate,
+              principalDue: monthPayment.principalDue,
+              interestDue: monthPayment.interestDue,
+              isPaid: paidPeriods.has(monthPayment.periodNumber)
+            } : null
+          });
+          
+          // Добавляем в прогноз только неоплаченные платежи
+          if (monthPayment && !paidPeriods.has(monthPayment.periodNumber)) {
+            forecastItems.push({
+              bank: credit.bank_name || 'Неизвестный банк',
+              creditNumber: credit.contract_number || 'Неизвестный номер',
+              month: monthStr,
+              principalAmount: Math.round(monthPayment.principalDue * 100) / 100,
+              interestAmount: Math.round(monthPayment.interestDue * 100) / 100,
+              totalAmount: Math.round(monthPayment.totalDue * 100) / 100
+            });
+          } else if (monthPayment && paidPeriods.has(monthPayment.periodNumber)) {
+            console.log(`[FORECAST DEBUG] Skipping paid period ${monthPayment.periodNumber} for credit ${credit.contract_number}`);
+          }
         }
-      });
-      
-      forecastMonths.push({
-        month: monthStr,
-        amount: monthlyAmount,
-        count: paymentCount
-      });
+        
+      } catch (error) {
+        console.error('Error calculating forecast for credit:', credit.contract_number, error);
+        // Продолжаем обработку других кредитов
+      }
     }
     
-    const thisMonth = forecastMonths[0]?.amount || 0;
-    const nextMonth = forecastMonths[1]?.amount || 0;
-    const quarter = forecastMonths.reduce((sum, month) => sum + month.amount, 0);
-    
+    console.log('[FORECAST DEBUG] Returning response with', forecastItems.length, 'items');
+    console.log('[FORECAST DEBUG] First item:', forecastItems[0]);
     res.json({
-      thisMonth,
-      nextMonth,
-      quarter,
-      items: forecastMonths
+      items: forecastItems
     });
     
   } catch (error) {

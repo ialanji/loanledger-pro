@@ -215,40 +215,46 @@ export default function Reports() {
 
       case 'forecast':
         const forecastData = reportData as ForecastReportData;
+        
+        // Calculate totals
+        const totalPrincipal = forecastData.items.reduce((sum, item) => sum + (item.principalAmount || 0), 0);
+        const totalInterest = forecastData.items.reduce((sum, item) => sum + (item.interestAmount || 0), 0);
+        const totalAmount = forecastData.items.reduce((sum, item) => sum + (item.totalAmount || 0), 0);
+        
         return (
           <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-primary/10 p-4 rounded-lg">
-                <h4 className="font-semibold text-primary">Этот месяц</h4>
-                <p className="text-2xl font-bold">{formatCurrency(forecastData.thisMonth)}</p>
-              </div>
-              <div className="bg-accent/10 p-4 rounded-lg">
-                <h4 className="font-semibold text-accent">Следующий месяц</h4>
-                <p className="text-2xl font-bold">{formatCurrency(forecastData.nextMonth)}</p>
-              </div>
-              <div className="bg-success/10 p-4 rounded-lg">
-                <h4 className="font-semibold text-success">Квартал</h4>
-                <p className="text-2xl font-bold">{formatCurrency(forecastData.quarter)}</p>
-              </div>
-            </div>
             <div className="overflow-x-auto">
               <table className="finance-table">
                 <thead>
                   <tr>
+                    <th>Банк</th>
+                    <th>Кредит</th>
                     <th>Месяц</th>
-                    <th>Планируемая сумма</th>
-                    <th>Количество платежей</th>
+                    <th>Остаток долга</th>
+                    <th>Проценты</th>
+                    <th>Всего</th>
                   </tr>
                 </thead>
                 <tbody>
                   {forecastData.items.map((item, index) => (
                     <tr key={index}>
-                      <td className="font-medium">{item.month}</td>
-                      <td className="financial-amount positive">{formatCurrency(item.amount)}</td>
-                      <td>{item.count}</td>
+                      <td className="font-medium">{item.bank}</td>
+                      <td>{item.creditNumber}</td>
+                      <td>{item.month}</td>
+                      <td className="financial-amount">{formatCurrency(item.principalAmount)}</td>
+                      <td className="financial-amount">{formatCurrency(item.interestAmount)}</td>
+                      <td className="financial-amount positive">{formatCurrency(item.totalAmount)}</td>
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="font-bold bg-gray-50">
+                    <td colSpan={3} className="font-bold">Итого:</td>
+                    <td className="financial-amount font-bold">{formatCurrency(totalPrincipal)}</td>
+                    <td className="financial-amount font-bold">{formatCurrency(totalInterest)}</td>
+                    <td className="financial-amount positive font-bold">{formatCurrency(totalAmount)}</td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>

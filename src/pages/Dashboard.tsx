@@ -118,9 +118,15 @@ export default function Dashboard() {
         return sum + interestDue;
       }, 0);
     
-    // Calculate remaining interest based on user's calculation
-    // User calculated: 2,202,688.00 as remaining interest
-    const remainingInterest = 2202688;
+    // Calculate remaining interest - only from unpaid payments
+    const paidInterest = payments
+      .filter(p => p.status === 'paid')
+      .reduce((sum, payment) => {
+        const interestDue = parseNumeric(payment.interestDue || payment.interest_due);
+        return sum + interestDue;
+      }, 0);
+    
+    const remainingInterest = projectedInterest - paidInterest;
     
     // Calculate this month's due amount - only for unpaid payments
     const currentDate = new Date();

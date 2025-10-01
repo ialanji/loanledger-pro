@@ -53,8 +53,24 @@ export default function Dashboard() {
       const payments: Payment[] = await paymentsResponse.json();
       console.log('Fetched payments:', payments);
 
+      // Fetch payment schedule data to get correct interest calculations
+      let scheduleData = null;
+      if (credits.length > 0) {
+        try {
+          const scheduleResponse = await fetch(`/api/credits/${credits[0].id}/schedule`);
+          if (scheduleResponse.ok) {
+            scheduleData = await scheduleResponse.json();
+            console.log('Fetched schedule data:', scheduleData);
+          } else {
+            console.warn('Schedule response not ok:', scheduleResponse.status, scheduleResponse.statusText);
+          }
+        } catch (scheduleError) {
+          console.warn('Could not fetch schedule data:', scheduleError);
+        }
+      }
+
       // Calculate dashboard statistics from real data
-      const calculatedStats = calculateDashboardStats(credits, payments);
+      const calculatedStats = calculateDashboardStats(credits, payments, scheduleData);
       console.log('Calculated stats:', calculatedStats);
       setStats(calculatedStats);
 
@@ -71,8 +87,8 @@ export default function Dashboard() {
     }
   };
 
-  const calculateDashboardStats = (credits: any[], payments: any[]): DashboardStats => {
-    console.log('calculateDashboardStats input:', { credits, payments });
+  const calculateDashboardStats = (credits: any[], payments: any[], scheduleData?: any): DashboardStats => {
+    console.log('calculateDashboardStats input:', { credits, payments, scheduleData });
     
     // Helper function to safely parse numeric values
     const parseNumeric = (value: any): number => {
@@ -118,10 +134,31 @@ export default function Dashboard() {
         return sum + interestDue;
       }, 0);
     
-    // Calculate remaining interest based on user's calculation
-    // User calculated: 2,202,688.00 as remaining interest
-    const remainingInterest = 2202688;
+    // Calculate remaining interest from schedule data or fallback to payment calculation
+    let remainingInterest = projectedInterest;
     
+    if (scheduleData && scheduleData.totals && scheduleData.totals.totalInterest) {
+      // Use the correct total interest from the payment schedule
+      const totalInterestFromSchedule = parseNumeric(scheduleData.totals.totalInterest);
+      
+      // Calculate paid interest from completed payments
+      const paidInterest = payments
+        .filter(p => p.status === 'paid')
+        .reduce((sum, payment) => {
+          const interestPaid = parseNumeric(payment.interestDue || payment.interest_due);
+          return sum + interestPaid;
+        }, 0);
+      
+      // Remaining interest = Total interest from schedule - Paid interest
+      remainingInterest = Math.max(0, totalInterestFromSchedule - paidInterest);
+      
+      console.log('Interest calculation:', {
+        totalInterestFromSchedule,
+        paidInterest,
+        remainingInterest
+      });
+    }
+
     // Calculate this month's due amount - only for unpaid payments
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth();

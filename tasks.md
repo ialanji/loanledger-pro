@@ -248,6 +248,45 @@ npm run dev
 Вывод:
 - Удаление платежа подтверждено на уровне API; UI интеграция готова и использует корректный вызов.
 Статус: ✅ Завершено
+
+### ProcessDuePaymentsJob Database Fix
+- [x] Fixed ProcessDuePaymentsJob database table reference error
+- [x] Changed table name from 'payments' to 'credit_payment' in ProcessDuePaymentsJob.js
+- [x] Updated column mappings (due_date, total_due, paid_at, paid_amount)
+- [x] Verified admin trigger endpoint functionality
+- [x] Tested job execution with zero errors
+- [x] Documented fix in build-documentation.md
+
+## 2025-01-01 — ProcessDuePaymentsJob Database Schema Fix
+
+Контекст:
+- ProcessDuePaymentsJob завершался с ошибкой `column "status" does not exist` при попытке обработки просроченных платежей.
+- Ошибка возникала в методах `findDuePayments` и `processPayment` в файле <mcfile name="ProcessDuePaymentsJob.js" path="src/jobs/ProcessDuePaymentsJob.js"></mcfile>.
+
+Диагностика:
+- Код обращался к таблице `payments`, которая не существует в базе данных.
+- Фактическая таблица для платежей называется `credit_payment` и содержит колонку `status`.
+- Найдена миграция `20250125_create_credit_payment_table.sql` с правильной структурой таблицы.
+- Колонки в `credit_payment` имеют другие названия: `due_date`, `total_due`, `paid_at`, `paid_amount`.
+
+Решение:
+- Обновлен файл <mcfile name="ProcessDuePaymentsJob.js" path="src/jobs/ProcessDuePaymentsJob.js"></mcfile>:
+  - Изменено имя таблицы с `payments` на `credit_payment` в обоих методах
+  - Обновлены названия колонок в SQL-запросах:
+    - `payment_date` → `due_date`
+    - `amount` → `total_due`
+    - `paid_date` → `paid_at`
+    - Добавлено обновление `paid_amount = total_due`
+- Перезапущен сервер для применения изменений.
+
+Верификация:
+- Сервер успешно запустился на порту 3001 без ошибок.
+- Протестирован эндпоинт `POST /api/admin/payments/process-due-job` - возвращает 200 OK.
+- Ответ: `{"success":true,"message":"Payment processing job completed","result":{"success":true,"processedCount":0,"totalDuePayments":0,"errors":[]}}`
+- Проверен статус эндпоинт `GET /api/admin/payments/process-due-job/status` - работает корректно.
+- В логах сервера отсутствуют ошибки базы данных.
+
+Статус: ✅ Завершено
 - Для визуальной проверки откройте http://localhost:8091/payments и воспользуйтесь кнопкой «Удалить».
 
 ## Verification Steps

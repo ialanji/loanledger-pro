@@ -5,6 +5,7 @@ import pkg from 'pg';
 const { Pool } = pkg;
 import { google } from 'googleapis';
 import { ScheduleEngine } from './src/services/schedule-engine.js';
+import { initializePaymentProcessingJob, setupPaymentProcessingRoutes } from './src/jobs/ProcessDuePaymentsJob.js';
 import cron from 'node-cron';
 
 dotenv.config();
@@ -12,9 +13,13 @@ dotenv.config();
 console.log('[BOOT]', { moduleUrl: import.meta.url, pid: process.pid, node: process.version });
 +console.log('[BOOT PATHS]', { cwd: process.cwd(), argv: process.argv });
 
-const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8093' : '');
+const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8091' : '');
 
 const app = express();
+
+// Принудительная инициализация роутера Express через первый маршрут
+app.get('/_init_router', (req, res) => res.status(404).end());
+console.log('[ROUTER INIT] Router initialized via dummy route:', !!app._router);
 const port = process.env.PORT || 3001;
 const host = process.env.BIND_HOST || '127.0.0.1';
 
@@ -37,6 +42,39 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   res.set('X-Global-Logger', 'active');
   console.log(`[REQ] ${req.method} ${req.url}`, { headers: req.headers });
+  
+  // Специальная отладка для admin routes
+  if (req.url.startsWith('/api/admin')) {
+    console.log(`[GLOBAL ADMIN DEBUG] URL: ${req.url}, Path: ${req.path}, Method: ${req.method}`);
+    console.log(`[GLOBAL ADMIN DEBUG] About to call next() - should reach admin middleware`);
+  }
+  
+  // Перехватываем res.end, res.send, res.json для отслеживания где завершается запрос
+  const originalEnd = res.end;
+  const originalSend = res.send;
+  const originalJson = res.json;
+  
+  res.end = function(...args) {
+    if (req.url.startsWith('/api/admin')) {
+      console.log(`[GLOBAL DEBUG] Request ${req.url} ended with res.end() - INTERCEPTED!`);
+    }
+    return originalEnd.apply(this, args);
+  };
+  
+  res.send = function(...args) {
+    if (req.url.startsWith('/api/admin')) {
+      console.log(`[GLOBAL DEBUG] Request ${req.url} ended with res.send() - INTERCEPTED!`);
+    }
+    return originalSend.apply(this, args);
+  };
+  
+  res.json = function(...args) {
+    if (req.url.startsWith('/api/admin')) {
+      console.log(`[GLOBAL DEBUG] Request ${req.url} ended with res.json() - INTERCEPTED!`, args[0]);
+    }
+    return originalJson.apply(this, args);
+  };
+  
   next();
 });
 
@@ -46,6 +84,12 @@ app.use('/api/payments', (req, res, next) => {
   console.log(`[PAYMENTS] ${req.method} ${req.originalUrl}`);
   next();
 });
+
+// Временно удаляем admin middleware отсюда - переместим его перед fallback
+
+// ProcessDuePaymentsJob API endpoints - УДАЛЯЕМ ОТСЮДА, ПЕРЕМЕЩАЕМ ПЕРЕД FALLBACK
+
+console.log('[SERVER] ProcessDuePaymentsJob API endpoints configured directly');
 
 // Debug ping routes for /api/payments
 app.get('/api/payments/ping', (req, res) => {
@@ -67,6 +111,14 @@ app.get('/api/version', (req, res) => {
 // Startup route introspection
 setTimeout(() => {
   try {
+    console.log('[ROUTER DEBUG]', {
+      hasRouter: !!app.router,
+      routerStack: app.router?.stack?.length || 0,
+      appKeys: Object.keys(app).filter(k => k.includes('router') || k.includes('stack')),
+      appType: typeof app,
+      appConstructor: app.constructor?.name
+    });
+
     const routes = [];
     const visit = (stack) => {
       if (!Array.isArray(stack)) return;
@@ -91,19 +143,21 @@ setTimeout(() => {
         } catch {}
       }
     };
-    visit(app?._router?.stack || []);
+    visit(app?.router?.stack || []);
 
     console.log('[ROUTES DEBUG]', {
       total: routes.length,
       hasPingGet: routes.some(r => r.path === '/api/payments/ping' && r.methods.includes('get')),
       hasPingPut: routes.some(r => r.path === '/api/payments/ping' && r.methods.includes('put')),
       hasVersion: routes.some(r => r.path === '/api/version' && r.methods.includes('get')),
+      hasAdminStatus: routes.some(r => r.path === '/api/admin/payments/process-due-job/status' && r.methods.includes('get')),
+      hasAdminTrigger: routes.some(r => r.path === '/api/admin/payments/process-due-job' && r.methods.includes('post')),
       sample: routes.slice(0, 25)
     });
   } catch (err) {
     console.error('[ROUTES DEBUG ERROR]', err);
   }
-}, 2000);
+}, 5000);
 
 // PostgreSQL connection
 const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
@@ -147,9 +201,9 @@ pool.connect((err, client, release) => {
 });
 
 // Scheduled jobs
-cron.schedule('0 8 * * *', async () => {
+cron.schedule('0 9 * * *', async () => {
   try {
-    console.log('[GenerateScheduledPaymentsJob] Started at 08:00');
+    console.log('[GenerateScheduledPaymentsJob] Started at 09:00');
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -3114,6 +3168,57 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Admin middleware - РАЗМЕЩАЕМ ПЕРЕД FALLBACK
+app.use('/api/admin', (req, res, next) => {
+  console.log(`[ADMIN MIDDLEWARE] ${req.method} ${req.originalUrl} - middleware hit`);
+  console.log(`[ADMIN MIDDLEWARE] req.path: ${req.path}, req.url: ${req.url}`);
+  console.log(`[ADMIN MIDDLEWARE] calling next()`);
+  next();
+});
+
+// Добавляем тестовый роут для проверки admin middleware
+app.get('/api/admin/test', (req, res) => {
+  console.log('[ADMIN TEST] Test endpoint called - ROUTE HIT!');
+  res.json({
+    success: true,
+    message: 'Admin test endpoint is working',
+    timestamp: new Date().toISOString(),
+    path: req.path,
+    originalUrl: req.originalUrl
+  });
+});
+
+// ProcessDuePaymentsJob API endpoints - добавляем после admin middleware
+app.post('/api/admin/payments/process-due-job', async (req, res) => {
+  console.log('[ProcessDuePaymentsJob] POST endpoint called directly - ROUTE HIT!');
+  try {
+    const { ProcessDuePaymentsJob } = await import('./src/jobs/ProcessDuePaymentsJob.js');
+    const job = ProcessDuePaymentsJob.getInstance();
+    const result = await job.execute();
+    res.json({
+      success: true,
+      message: 'Payment processing job completed',
+      result
+    });
+  } catch (error) {
+    console.error('[ProcessDuePaymentsJob] Manual execution error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Payment processing job failed',
+      error: error.message
+    });
+  }
+});
+
+app.get('/api/admin/payments/process-due-job/status', (req, res) => {
+  console.log('[ProcessDuePaymentsJob] Status endpoint called - ROUTE HIT!');
+  res.json({
+    success: true,
+    message: 'ProcessDuePaymentsJob status endpoint is working',
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // Fallback route for SPA - serve index.html for non-API routes
@@ -3129,6 +3234,11 @@ app.use((req, res) => {
 
 app.listen(port, host, () => {
   console.log(`Server running on port ${port}`);
+  
+  // Инициализируем фоновую задачу для автоматической оплаты платежей
+  initializePaymentProcessingJob(pool);
+  console.log('[ProcessDuePaymentsJob] Initialized and scheduled to run daily at 08:00');
+  
   // Self-probe /api/version to validate reachability and headers
   setTimeout(() => {
     try {

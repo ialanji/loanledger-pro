@@ -180,20 +180,37 @@ export default function Dashboard() {
       });
     }
 
-    // Calculate this month's due amount - only for unpaid payments
+    // Calculate this month's payments - include all payments for current month
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
     
+    console.log('Current date info:', { currentMonth, currentYear, currentDate: currentDate.toISOString() });
+    
     const thisMonthPayments = payments.filter(p => {
       const dueDate = new Date(p.dueDate || p.due_date);
-      return dueDate.getMonth() === currentMonth && 
-             dueDate.getFullYear() === currentYear &&
-             (p.status === 'scheduled' || p.status === 'pending');
+      const paymentMonth = dueDate.getMonth();
+      const paymentYear = dueDate.getFullYear();
+      
+      console.log('Payment date check:', {
+        paymentId: p.id,
+        dueDate: p.dueDate || p.due_date,
+        paymentMonth,
+        paymentYear,
+        status: p.status,
+        matches: paymentMonth === currentMonth && paymentYear === currentYear
+      });
+      
+      return paymentMonth === currentMonth && 
+             paymentYear === currentYear;
+             // Include all payments for current month regardless of status
     });
+    
+    console.log('This month payments found:', thisMonthPayments.length, thisMonthPayments);
     
     const thisMonthDue = thisMonthPayments.reduce((sum, payment) => {
       const totalDue = parseNumeric(payment.totalDue || payment.total_due);
+      console.log('Adding payment to month total:', { totalDue, currentSum: sum });
       return sum + totalDue;
     }, 0);
     

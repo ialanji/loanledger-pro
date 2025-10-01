@@ -1,0 +1,38 @@
+{
+  "name": "loanledger-pro-tests",
+  "version": "1.0.0",
+  "description": "Test suite for LoanLedger Pro",
+  "scripts": {
+    "test": "jest",
+    "test:unit": "jest unit/",
+    "test:integration": "jest integration/",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "debug:credit": "node debug/debug_credit_creation.cjs",
+    "debug:payment": "node debug/debug_payment_update.cjs",
+    "debug:schedule": "node debug/debug_schedule.mjs",
+    "db:create": "node database/create_tables.cjs",
+    "db:setup": "node database/create_finance_database.cjs",
+    "check:tables": "node scripts/check_tables.cjs",
+    "check:payments": "node scripts/check_latest_payments.cjs",
+    "verify:db": "node scripts/verify_database.cjs"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/unit/**/*.test.js",
+      "**/unit/**/*.spec.js",
+      "**/integration/**/*.test.js"
+    ],
+    "collectCoverageFrom": [
+      "../src/**/*.js",
+      "../server.js",
+      "!../node_modules/**"
+    ],
+    "setupFilesAfterEnv": ["./scripts/setupTests.js"]
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "@types/jest": "^29.0.0"
+  }
+}

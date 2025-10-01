@@ -11,13 +11,13 @@ export interface OverdueReportData {
 }
 
 export interface ForecastReportData {
-  thisMonth: number;
-  nextMonth: number;
-  quarter: number;
   items: Array<{
+    bank: string;
+    creditNumber: string;
     month: string;
-    amount: number;
-    count: number;
+    principalAmount: number;
+    interestAmount: number;
+    totalAmount: number;
   }>;
 }
 

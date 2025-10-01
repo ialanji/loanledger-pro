@@ -134,8 +134,29 @@ export default function Dashboard() {
         return sum + interestDue;
       }, 0);
     
-    // Calculate remaining interest from schedule data or fallback to payment calculation
+    // Calculate remaining interest - prioritize schedule data, fallback to payment calculation
     let remainingInterest = projectedInterest;
+    
+    if (scheduleData?.totalInterest) {
+      const paidInterest = payments
+        .filter(p => p.status === 'paid')
+        .reduce((sum, payment) => {
+          const interestDue = parseNumeric(payment.interestDue || payment.interest_due);
+          return sum + interestDue;
+        }, 0);
+      
+      remainingInterest = scheduleData.totalInterest - paidInterest;
+    } else {
+      // Fallback: calculate from unpaid payments
+      const paidInterest = payments
+        .filter(p => p.status === 'paid')
+        .reduce((sum, payment) => {
+          const interestDue = parseNumeric(payment.interestDue || payment.interest_due);
+          return sum + interestDue;
+        }, 0);
+      
+      remainingInterest = projectedInterest - paidInterest;
+    }
     
     if (scheduleData && scheduleData.totals && scheduleData.totals.totalInterest) {
       // Use the correct total interest from the payment schedule

@@ -8,9 +8,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CalculationMethod } from '@/types/credit';
+import { CalculationMethod, CreditType } from '@/types/credit';
 import { ScheduleEngine } from '@/services/schedule-engine';
 import { useToast } from '@/hooks/use-toast';
+import { CreditTypeSelect } from '@/components/CreditTypeSelect';
 
 interface Bank {
   id: string;
@@ -23,6 +24,7 @@ interface CreditFormData {
   principal: string;
   currencyCode: string;
   bankId: string;
+  creditType: CreditType;
   method: CalculationMethod | '';
   paymentDay: string;
   startDate: string;
@@ -59,6 +61,7 @@ export default function CreateCredit() {
     principal: '',
     currencyCode: 'MDL',
     bankId: '',
+    creditType: 'investment',
     method: '',
     paymentDay: '20',
     startDate: new Date().toISOString().split('T')[0],
@@ -222,6 +225,7 @@ export default function CreateCredit() {
         principal: parseFloat(formData.principal),
         currencyCode: formData.currencyCode,
         bankId: formData.bankId,
+        creditType: formData.creditType,
         method: formData.method,
         startDate: formData.startDate,
         termMonths: parseInt(formData.termMonths, 10),
@@ -371,6 +375,14 @@ export default function CreateCredit() {
                     <SelectItem value="EUR">EUR - Евро</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="creditType">Тип кредита *</Label>
+                <CreditTypeSelect
+                  value={formData.creditType}
+                  onValueChange={(value) => updateFormData('creditType', value)}
+                />
               </div>
             </CardContent>
           </Card>

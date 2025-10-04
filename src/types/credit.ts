@@ -1,3 +1,5 @@
+export type CreditType = 'investment' | 'working_capital';
+
 export enum CalculationMethod {
   CLASSIC_ANNUITY = 'classic_annuity',
   CLASSIC_DIFFERENTIATED = 'classic_differentiated',
@@ -26,6 +28,7 @@ export interface Credit {
   principal: number;
   currencyCode: string;
   bankId?: string;
+  creditType: CreditType;
   method: CalculationMethod;
   paymentDay: number;
   startDate: Date;
@@ -124,4 +127,9 @@ export interface PaymentScheduleResponse {
   };
   schedule: ScheduleItemWithRate[];
   totals: ScheduleTotals;
+}
+
+// Type guard function for CreditType validation
+export function isValidCreditType(value: string): value is CreditType {
+  return value === 'investment' || value === 'working_capital';
 }

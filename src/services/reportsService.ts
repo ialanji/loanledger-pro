@@ -1,3 +1,5 @@
+export type ReportForm = 'list' | 'table';
+
 export interface OverdueReportData {
   totalAmount: number;
   count: number;
@@ -21,6 +23,16 @@ export interface ForecastReportData {
   }>;
 }
 
+export interface CreditDetail {
+  id: string;
+  contractNumber: string;
+  principal: number;
+  startDate: string;
+  paidAmount: number;
+  remainingBalance: number;
+  rate: number;
+}
+
 export interface PortfolioReportData {
   totalPrincipal: number;
   totalCredits: number;
@@ -32,6 +44,7 @@ export interface PortfolioReportData {
     avgRate: number;
     totalPaid: number;
     remainingBalance: number;
+    credits: CreditDetail[];
   }>;
 }
 
@@ -63,37 +76,37 @@ class ReportsService {
 
   private async fetchReport<T>(endpoint: string, filters: ReportFilters): Promise<T> {
     const params = new URLSearchParams();
-    
+
     if (filters.dateFrom) {
       params.append('dateFrom', filters.dateFrom);
     }
-    
+
     if (filters.dateTo) {
       params.append('dateTo', filters.dateTo);
     }
-    
+
     if (filters.bankId && filters.bankId !== 'all') {
       params.append('bankId', filters.bankId);
     }
 
     const url = `${this.baseUrl}/${endpoint}${params.toString() ? `?${params.toString()}` : ''}`;
-    
+
     const response = await fetch(url);
-    
+
     if (!response.ok) {
       throw new Error(`Failed to fetch ${endpoint} report: ${response.statusText}`);
     }
-    
+
     return response.json();
   }
 
   async getBanks(): Promise<Bank[]> {
     const response = await fetch('/api/banks');
-    
+
     if (!response.ok) {
       throw new Error(`Failed to fetch banks: ${response.statusText}`);
     }
-    
+
     return response.json();
   }
 
@@ -115,15 +128,15 @@ class ReportsService {
 
   async exportReport(reportType: string, format: string, filters: ReportFilters): Promise<void> {
     const params = new URLSearchParams();
-    
+
     if (filters.dateFrom) {
       params.append('dateFrom', filters.dateFrom);
     }
-    
+
     if (filters.dateTo) {
       params.append('dateTo', filters.dateTo);
     }
-    
+
     if (filters.bankId && filters.bankId !== 'all') {
       params.append('bankId', filters.bankId);
     }
@@ -131,23 +144,23 @@ class ReportsService {
     params.append('format', format);
 
     const url = `${this.baseUrl}/${reportType}/export?${params.toString()}`;
-    
+
     const response = await fetch(url);
-    
+
     if (!response.ok) {
       throw new Error(`Failed to export ${reportType} report: ${response.statusText}`);
     }
-    
+
     // Создаем blob и скачиваем файл
     const blob = await response.blob();
     const downloadUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = downloadUrl;
-    
+
     // Определяем расширение файла
     const extension = format === 'excel' ? 'xlsx' : format;
     link.download = `${reportType}_report.${extension}`;
-    
+
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

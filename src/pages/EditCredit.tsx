@@ -13,7 +13,8 @@ import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CalculationMethod } from '@/types/credit';
+import { CalculationMethod, CreditType } from '@/types/credit';
+import { CreditTypeSelect } from '@/components/CreditTypeSelect';
 
 interface Credit {
   id: string;
@@ -23,6 +24,7 @@ interface Credit {
   bankId: number;
   bankName: string;
   method: string;
+  creditType: CreditType;
   paymentDay: number;
   startDate: string;
   termMonths: number;
@@ -42,6 +44,7 @@ interface RateHistoryEntry {
 }
 
 interface EditCreditFormData {
+  creditType: CreditType;
   paymentDay: number;
   termMonths: number;
   defermentMonths: number;
@@ -58,6 +61,7 @@ export default function EditCredit() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<EditCreditFormData>({
+    creditType: 'investment',
     paymentDay: 1,
     termMonths: 12,
     defermentMonths: 0,
@@ -119,6 +123,7 @@ export default function EditCredit() {
         bankId: creditData.bank_id ?? creditData.bankId ?? 0,
         bankName: creditData.bank_name ?? creditData.bankName ?? '',
         method: creditData.method,
+        creditType: (creditData.credit_type ?? creditData.creditType ?? 'investment') as CreditType,
         paymentDay: creditData.payment_day ?? creditData.paymentDay ?? 1,
         startDate: toIsoDate(creditData.start_date ?? creditData.startDate ?? ''),
         termMonths: creditData.term_months ?? creditData.termMonths ?? 12,
@@ -135,6 +140,7 @@ export default function EditCredit() {
       setHasPayments(hasExistingPayments);
       // When setting formData from fetched rate history, support effective_date/effectiveDate/effectiveFrom
       setFormData({
+        creditType: normalizedCredit.creditType,
         paymentDay: normalizedCredit.paymentDay,
         termMonths: normalizedCredit.termMonths,
         defermentMonths: normalizedCredit.defermentMonths,
@@ -325,6 +331,7 @@ export default function EditCredit() {
       console.log('Prepared rate history for API:', preparedRateHistory); // Для отладки
 
       const updateData = {
+        creditType: formData.creditType,
         paymentDay: formData.paymentDay,
         termMonths: formData.termMonths,
         defermentMonths: formData.defermentMonths,
@@ -385,6 +392,11 @@ export default function EditCredit() {
       return !hasPayments && isClassic(credit.method);
     }
     
+    // Credit type can only be edited if no payments exist
+    if (field === 'creditType') {
+      return !hasPayments;
+    }
+    
     // Other fields can only be edited if no payments exist
     return !hasPayments;
   };
@@ -400,6 +412,9 @@ export default function EditCredit() {
       if (field === 'notes') return '';
       if (field === 'rateHistory' && isFloating(credit.method)) {
         return '';
+      }
+      if (field === 'creditType') {
+        return 'Невозможно изменить тип кредита при наличии платежей';
       }
       return 'После первого платежа можно редактировать только примечания и историю ставок (для плавающих методов)';
     }
@@ -510,6 +525,18 @@ export default function EditCredit() {
                 <Input value={getMethodLabel(credit.method)} disabled />
                 <p className="text-sm text-gray-500 mt-1">Нельзя изменить после создания</p>
               </div>
+            </div>
+            
+            <div>
+              <Label htmlFor="creditType">Тип кредита</Label>
+              <CreditTypeSelect
+                value={formData.creditType}
+                onValueChange={(value) => handleInputChange('creditType', value)}
+                disabled={!canEditField('creditType')}
+              />
+              {!canEditField('creditType') && (
+                <p className="text-sm text-gray-500 mt-1">{getFieldDisabledReason('creditType')}</p>
+              )}
             </div>
           </CardContent>
         </Card>

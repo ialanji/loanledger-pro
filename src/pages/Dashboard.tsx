@@ -19,11 +19,19 @@ import { formatCurrency } from '@/lib/utils';
 import { apiClient } from '@/lib/api';
 
 import StatCard from '@/components/dashboard/StatCard';
+import CreditTypeTotalCard from '@/components/dashboard/CreditTypeTotalCard';
+
+interface CreditTypeTotals {
+  investment: number;
+  working_capital: number;
+  total: number;
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [upcomingPayments, setUpcomingPayments] = useState<Payment[]>([]);
+  const [creditTypeTotals, setCreditTypeTotals] = useState<CreditTypeTotals | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +60,15 @@ export default function Dashboard() {
       }
       const payments: Payment[] = await paymentsResponse.json();
       console.log('Fetched payments:', payments);
+
+      // Fetch credit totals by type
+      const totalsResponse = await fetch('/api/credits/totals-by-type');
+      if (!totalsResponse.ok) {
+        throw new Error('Failed to fetch credit totals by type');
+      }
+      const totals: CreditTypeTotals = await totalsResponse.json();
+      console.log('Fetched credit totals by type:', totals);
+      setCreditTypeTotals(totals);
 
       // Fetch payment schedule data to get correct interest calculations
       let scheduleData = null;
@@ -358,14 +375,14 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
               {/* Общая сумма кредита */}
               <div>
                 <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">
                   ОБЩАЯ СУММА КРЕДИТА
                 </p>
                 <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mb-1">
-                  {formatCurrency(stats.totalPrincipal).replace('MDL', '₽')}
+                  {formatCurrency(creditTypeTotals?.total || stats.totalPrincipal).replace('MDL', '₽')}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {stats.totalCredits} кредит в {stats.activeCredits} банках
@@ -381,7 +398,7 @@ export default function Dashboard() {
                   {formatCurrency(stats.remainingPrincipal).replace('MDL', '₽')}
                 </p>
                 <p className="text-xs text-blue-500">
-                  ✓ {((stats.remainingPrincipal / stats.totalPrincipal) * 100).toFixed(1)}% от общей суммы
+                  ✓ {((stats.remainingPrincipal / (creditTypeTotals?.total || stats.totalPrincipal)) * 100).toFixed(1)}% от общей суммы
                 </p>
               </div>
 
@@ -398,6 +415,22 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
+
+            {/* Credit Type Breakdown */}
+            {creditTypeTotals && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-4 border-t">
+                <CreditTypeTotalCard
+                  type="investment"
+                  total={creditTypeTotals.investment}
+                  label="ИНВЕСТИЦИОННЫЕ КРЕДИТЫ"
+                />
+                <CreditTypeTotalCard
+                  type="working_capital"
+                  total={creditTypeTotals.working_capital}
+                  label="ОБОРОТНЫЕ СРЕДСТВА"
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
 

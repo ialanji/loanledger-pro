@@ -1,9 +1,9 @@
 const axios = require('axios');
 
-async function callDebugEndpoint() {
+async function callUnprocessed() {
   try {
     const creditId = '2ceff137-41e9-4616-8465-900a76e607ef';
-    const url = `http://localhost:3001/api/debug/credit_payment/${creditId}`;
+    const url = `http://localhost:3001/api/credits/${creditId}/payments/unprocessed`;
     console.log(`Calling URL: ${url}`);
     const response = await axios.get(url);
     console.log('Response:', response.data);
@@ -12,4 +12,4 @@ async function callDebugEndpoint() {
   }
 }
 
-callDebugEndpoint();
+callUnprocessed();

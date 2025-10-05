@@ -92,6 +92,8 @@ export interface DashboardStats {
   remainingPrincipal: number;
   projectedInterest: number;
   thisMonthDue: number;
+  thisMonthPrincipal: number;
+  thisMonthInterest: number;
   overdueAmount: number;
   totalPaid: number;
 }

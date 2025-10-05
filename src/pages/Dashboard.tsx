@@ -15,7 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { DashboardStats, Payment, Credit } from '@/types/credit';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency } from '@/utils/formatters';
 import { apiClient } from '@/lib/api';
 
 import StatCard from '@/components/dashboard/StatCard';
@@ -53,13 +53,13 @@ export default function Dashboard() {
       const credits: Credit[] = await creditsResponse.json();
       console.log('Fetched credits:', credits);
 
-      // Fetch payments
-      const paymentsResponse = await fetch('/api/payments');
-      if (!paymentsResponse.ok) {
-        throw new Error('Failed to fetch payments');
+      // Fetch historical payments (actual paid payments)
+      const historicalPaymentsResponse = await fetch('/api/payments/historical');
+      if (!historicalPaymentsResponse.ok) {
+        throw new Error('Failed to fetch historical payments');
       }
-      const payments: Payment[] = await paymentsResponse.json();
-      console.log('Fetched payments:', payments);
+      const historicalPayments: Payment[] = await historicalPaymentsResponse.json();
+      console.log('Fetched historical payments:', historicalPayments);
 
       // Fetch credit totals by type
       const totalsResponse = await fetch('/api/credits/totals-by-type');
@@ -70,29 +70,43 @@ export default function Dashboard() {
       console.log('Fetched credit totals by type:', totals);
       setCreditTypeTotals(totals);
 
-      // Fetch payment schedule data to get correct interest calculations
-      let scheduleData = null;
+      // Fetch payment schedule data for ALL credits to get correct interest calculations
+      let allScheduleData: any[] = [];
       if (credits.length > 0) {
-        try {
-          const scheduleResponse = await fetch(`/api/credits/${credits[0].id}/schedule`);
-          if (scheduleResponse.ok) {
-            scheduleData = await scheduleResponse.json();
-            console.log('Fetched schedule data:', scheduleData);
-          } else {
-            console.warn('Schedule response not ok:', scheduleResponse.status, scheduleResponse.statusText);
+        console.log('Fetching schedule data for all credits...');
+        for (const credit of credits) {
+          try {
+            const scheduleResponse = await fetch(`/api/credits/${credit.id}/schedule`);
+            if (scheduleResponse.ok) {
+              const scheduleData = await scheduleResponse.json();
+              allScheduleData.push({
+                creditId: credit.id,
+                contractNumber: credit.contractNumber,
+                schedule: scheduleData
+              });
+              console.log(`Fetched schedule data for credit ${credit.contractNumber}:`, scheduleData.totals);
+            } else {
+              console.warn(`Schedule response not ok for credit ${credit.id}:`, scheduleResponse.status, scheduleResponse.statusText);
+            }
+          } catch (scheduleError) {
+            console.warn(`Could not fetch schedule data for credit ${credit.id}:`, scheduleError);
           }
-        } catch (scheduleError) {
-          console.warn('Could not fetch schedule data:', scheduleError);
         }
+        console.log('All schedule data fetched:', allScheduleData.length, 'credits');
       }
 
+      // Get scheduled payments for monthly calculations and upcoming payments
+      const scheduledPaymentsResponse = await fetch('/api/payments');
+      const scheduledPayments: Payment[] = scheduledPaymentsResponse.ok ? await scheduledPaymentsResponse.json() : [];
+      console.log('Fetched scheduled payments:', scheduledPayments);
+
       // Calculate dashboard statistics from real data
-      const calculatedStats = calculateDashboardStats(credits, payments, scheduleData);
+      const calculatedStats = calculateDashboardStats(credits, historicalPayments, scheduledPayments, allScheduleData);
       console.log('Calculated stats:', calculatedStats);
       setStats(calculatedStats);
 
       // Get upcoming payments (next 30 days)
-      const upcoming = getUpcomingPayments(payments);
+      const upcoming = getUpcomingPayments(scheduledPayments);
       console.log('Upcoming payments:', upcoming);
       setUpcomingPayments(upcoming);
 
@@ -104,8 +118,8 @@ export default function Dashboard() {
     }
   };
 
-  const calculateDashboardStats = (credits: any[], payments: any[], scheduleData?: any): DashboardStats => {
-    console.log('calculateDashboardStats input:', { credits, payments, scheduleData });
+  const calculateDashboardStats = (credits: any[], historicalPayments: any[], scheduledPayments: any[], allScheduleData?: any[]): DashboardStats => {
+    console.log('calculateDashboardStats input:', { credits, historicalPayments, scheduledPayments, allScheduleData });
     
     // Helper function to safely parse numeric values
     const parseNumeric = (value: any): number => {
@@ -129,13 +143,12 @@ export default function Dashboard() {
     
     console.log('Total principal calculated:', totalPrincipal);
     
-    // Calculate remaining principal - only count PRINCIPAL payments, not interest
-    const totalPrincipalPaid = payments
-      .filter(p => p.status === 'paid')
+    // Calculate remaining principal - use historical payments (actual paid amounts)
+    const totalPrincipalPaid = historicalPayments
       .reduce((sum, payment) => {
-        // Only count principal_due, not interest_due or total_due
-        const principalPaid = parseNumeric(payment.principalDue || payment.principal_due);
-        console.log('Principal payment:', { original: payment.principal_due, parsed: principalPaid });
+        // Use principal_amount from historical payments
+        const principalPaid = parseNumeric(payment.principal_amount);
+        console.log('Principal payment:', { original: payment.principal_amount, parsed: principalPaid });
         return sum + principalPaid;
       }, 0);
     
@@ -143,57 +156,74 @@ export default function Dashboard() {
     
     const remainingPrincipal = totalPrincipal - totalPrincipalPaid;
     
-    // Calculate projected interest from ALL payments (both paid and unpaid)
-    // This represents the total interest that will be paid over the life of the credit
-    const projectedInterest = payments
-      .reduce((sum, payment) => {
+    // Calculate total projected interest from schedule data for ALL credits
+    let totalProjectedInterest = 0;
+    
+    console.log('--- INTEREST CALCULATION PHASE ---');
+    console.log('Schedule data availability check:', {
+      hasScheduleData: !!(allScheduleData && allScheduleData.length > 0),
+      scheduleDataLength: allScheduleData?.length || 0,
+      activeCreditsCount: activeCredits.length
+    });
+    
+    if (allScheduleData && allScheduleData.length > 0) {
+      console.log('Using SCHEDULE-BASED calculation method');
+      
+      // Log each credit's schedule data for debugging
+      allScheduleData.forEach((scheduleItem, index) => {
+        const totalInterest = parseNumeric(scheduleItem.schedule?.totals?.totalInterest || 0);
+        console.log(`Schedule ${index + 1} - Credit ${scheduleItem.contractNumber}:`, {
+          creditId: scheduleItem.creditId,
+          totalInterest,
+          hasSchedule: !!scheduleItem.schedule,
+          hasTotals: !!scheduleItem.schedule?.totals,
+          rawTotalInterest: scheduleItem.schedule?.totals?.totalInterest
+        });
+      });
+      
+      // Sum up total interest from all credit schedules - this is the total interest cost
+      totalProjectedInterest = allScheduleData.reduce((sum, scheduleItem, index) => {
+        const totalInterest = parseNumeric(scheduleItem.schedule?.totals?.totalInterest || 0);
+        const newSum = sum + totalInterest;
+        console.log(`Accumulating interest ${index + 1}:`, {
+          creditId: scheduleItem.creditId,
+          interestAmount: totalInterest,
+          runningTotal: newSum
+        });
+        return newSum;
+      }, 0);
+      
+      console.log('SCHEDULE-BASED calculation complete:', {
+        totalInterestFromAllSchedules: totalProjectedInterest,
+        calculationMethod: 'schedule-based',
+        totalProjectedInterest,
+        creditsProcessed: allScheduleData.length
+      });
+    } else {
+      console.log('Using PAYMENT-BASED fallback calculation method');
+      console.log('Fallback reason:', {
+        noScheduleData: !allScheduleData,
+        emptyScheduleData: allScheduleData && allScheduleData.length === 0,
+        paymentsAvailable: scheduledPayments.length
+      });
+      
+      // Fallback: calculate total projected interest from all scheduled payments
+      totalProjectedInterest = scheduledPayments.reduce((sum, payment, index) => {
         const interestDue = parseNumeric(payment.interestDue || payment.interest_due);
+        if (index < 5) { // Log first few for debugging
+          console.log(`Payment ${index + 1} interest:`, {
+            paymentId: payment.id,
+            interestDue,
+            runningTotal: sum + interestDue
+          });
+        }
         return sum + interestDue;
       }, 0);
-    
-    // Calculate remaining interest - prioritize schedule data, fallback to payment calculation
-    let remainingInterest = projectedInterest;
-    
-    if (scheduleData?.totalInterest) {
-      const paidInterest = payments
-        .filter(p => p.status === 'paid')
-        .reduce((sum, payment) => {
-          const interestDue = parseNumeric(payment.interestDue || payment.interest_due);
-          return sum + interestDue;
-        }, 0);
       
-      remainingInterest = scheduleData.totalInterest - paidInterest;
-    } else {
-      // Fallback: calculate from unpaid payments
-      const paidInterest = payments
-        .filter(p => p.status === 'paid')
-        .reduce((sum, payment) => {
-          const interestDue = parseNumeric(payment.interestDue || payment.interest_due);
-          return sum + interestDue;
-        }, 0);
-      
-      remainingInterest = projectedInterest - paidInterest;
-    }
-    
-    if (scheduleData && scheduleData.totals && scheduleData.totals.totalInterest) {
-      // Use the correct total interest from the payment schedule
-      const totalInterestFromSchedule = parseNumeric(scheduleData.totals.totalInterest);
-      
-      // Calculate paid interest from completed payments
-      const paidInterest = payments
-        .filter(p => p.status === 'paid')
-        .reduce((sum, payment) => {
-          const interestPaid = parseNumeric(payment.interestDue || payment.interest_due);
-          return sum + interestPaid;
-        }, 0);
-      
-      // Remaining interest = Total interest from schedule - Paid interest
-      remainingInterest = Math.max(0, totalInterestFromSchedule - paidInterest);
-      
-      console.log('Interest calculation:', {
-        totalInterestFromSchedule,
-        paidInterest,
-        remainingInterest
+      console.log('PAYMENT-BASED calculation complete:', {
+        totalProjectedInterest,
+        calculationMethod: 'payment-based',
+        paymentsProcessed: scheduledPayments.length
       });
     }
 
@@ -204,7 +234,7 @@ export default function Dashboard() {
     
     console.log('Current date info:', { currentMonth, currentYear, currentDate: currentDate.toISOString() });
     
-    const thisMonthPayments = payments.filter(p => {
+    const thisMonthPayments = scheduledPayments.filter(p => {
       const dueDate = new Date(p.dueDate || p.due_date);
       const paymentMonth = dueDate.getMonth();
       const paymentYear = dueDate.getFullYear();
@@ -242,8 +272,8 @@ export default function Dashboard() {
       return sum + interestDue;
     }, 0);
     
-    // Calculate overdue amount
-    const overdueAmount = payments
+    // Calculate overdue amount from scheduled payments
+    const overdueAmount = scheduledPayments
       .filter(p => p.status === 'overdue')
       .reduce((sum, payment) => {
         const totalDue = parseNumeric(payment.totalDue || payment.total_due);
@@ -255,7 +285,7 @@ export default function Dashboard() {
       activeCredits: activeCredits.length,
       totalPrincipal,
       remainingPrincipal: Math.max(0, remainingPrincipal), // Ensure non-negative
-      projectedInterest: remainingInterest, // Show remaining interest to be paid
+      projectedInterest: Math.max(0, totalProjectedInterest - (historicalPayments.reduce((sum, payment) => sum + parseNumeric(payment.interest_amount), 0))), // Show remaining interest to be paid
       thisMonthDue,
       thisMonthPrincipal,
       thisMonthInterest,
@@ -282,14 +312,7 @@ export default function Dashboard() {
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
       .slice(0, 10); // Limit to 10 upcoming payments
   };
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('ro-MD', {
-      style: 'currency',
-      currency: 'MDL',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
-  };
+
 
   const formatDate = (date: Date) => {
     return new Intl.DateTimeFormat('ro-MD', {

@@ -1644,11 +1644,50 @@ app.get('/api/payments', async (req, res) => {
     `;
 
     const result = await pool.query(query, params);
--    res.json(result.rows);
-+    res.set('X-Payments-List', 'active');
-+    res.json(result.rows);
+    res.set('X-Payments-List', 'active');
+    res.json(result.rows);
   } catch (error) {
     console.error('Error fetching payments:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/payments/historical - List historical payments from credit_payment table (actual paid payments)
+app.get('/api/payments/historical', async (req, res) => {
+  try {
+    const { creditId } = req.query;
+    const params = [];
+    const whereClauses = ['cp.status = $1'];
+    params.push('paid');
+
+    if (creditId) {
+      whereClauses.push(`cp.credit_id = $${params.length + 1}`);
+      params.push(creditId);
+    }
+
+    const where = `WHERE ${whereClauses.join(' AND ')}`;
+
+    const query = `
+      SELECT 
+        cp.id,
+        cp.credit_id,
+        cp.paid_amount as payment_amount,
+        cp.interest_due as interest_amount,
+        cp.principal_due as principal_amount,
+        cp.paid_at as payment_date,
+        cp.status,
+        c.contract_number
+      FROM credit_payment cp
+      LEFT JOIN credits c ON c.id = cp.credit_id
+      ${where}
+      ORDER BY cp.paid_at DESC
+    `;
+
+    const result = await pool.query(query, params);
+    res.set('X-Historical-Payments', 'active');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching historical payments:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

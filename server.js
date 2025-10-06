@@ -3009,41 +3009,39 @@ app.get('/api/reports/forecast', async (req, res) => {
           paidPeriodsCount: paidPeriods.size
         });
         
-        // Извлекаем платежи для следующих 12 месяцев
-        for (let i = 0; i < 12; i++) {
-          const targetMonth = new Date(now.getFullYear(), now.getMonth() + i, 1);
-          const monthStr = targetMonth.toISOString().substring(0, 7);
+        // Определяем окно прогноза (следующие 12 месяцев)
+        const startForecast = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endForecast = new Date(now.getFullYear(), now.getMonth() + 12, 0); // Последний день 12-го месяца
+        
+        console.log(`[FORECAST DEBUG] Forecast window for credit ${credit.contract_number}:`, {
+          startForecast: startForecast.toISOString().substring(0, 10),
+          endForecast: endForecast.toISOString().substring(0, 10),
+          totalPayments: scheduleResponse.schedule.length
+        });
+        
+        // Проходим по ВСЕМ платежам в графике
+        for (const payment of scheduleResponse.schedule) {
+          const paymentDate = new Date(payment.dueDate);
           
-          // Находим платеж, который должен быть в этом месяце
-          const monthPayment = scheduleResponse.schedule.find(payment => {
-            const paymentDate = new Date(payment.dueDate);
-            return paymentDate.getFullYear() === targetMonth.getFullYear() && 
-                   paymentDate.getMonth() === targetMonth.getMonth();
-          });
-          
-          console.log(`[FORECAST DEBUG] Month ${monthStr} for credit ${credit.contract_number}:`, {
-            targetMonth: targetMonth,
-            foundPayment: monthPayment ? {
-              periodNumber: monthPayment.periodNumber,
-              dueDate: monthPayment.dueDate,
-              principalDue: monthPayment.principalDue,
-              interestDue: monthPayment.interestDue,
-              isPaid: paidPeriods.has(monthPayment.periodNumber)
-            } : null
-          });
-          
-          // Добавляем в прогноз только неоплаченные платежи
-          if (monthPayment && !paidPeriods.has(monthPayment.periodNumber)) {
-            forecastItems.push({
-              bank: credit.bank_name || 'Неизвестный банк',
-              creditNumber: credit.contract_number || 'Неизвестный номер',
-              month: monthStr,
-              principalAmount: Math.round(monthPayment.principalDue * 100) / 100,
-              interestAmount: Math.round(monthPayment.interestDue * 100) / 100,
-              totalAmount: Math.round(monthPayment.totalDue * 100) / 100
-            });
-          } else if (monthPayment && paidPeriods.has(monthPayment.periodNumber)) {
-            console.log(`[FORECAST DEBUG] Skipping paid period ${monthPayment.periodNumber} for credit ${credit.contract_number}`);
+          // Проверяем, попадает ли платеж в окно прогноза (следующие 12 месяцев)
+          if (paymentDate >= startForecast && paymentDate <= endForecast) {
+            // Добавляем в прогноз только неоплаченные платежи
+            if (!paidPeriods.has(payment.periodNumber)) {
+              const monthStr = paymentDate.toISOString().substring(0, 7); // "YYYY-MM"
+              
+              forecastItems.push({
+                bank: credit.bank_name || 'Неизвестный банк',
+                creditNumber: credit.contract_number || 'Неизвестный номер',
+                month: monthStr,
+                principalAmount: Math.round(payment.principalDue * 100) / 100,
+                interestAmount: Math.round(payment.interestDue * 100) / 100,
+                totalAmount: Math.round(payment.totalDue * 100) / 100
+              });
+              
+              console.log(`[FORECAST DEBUG] Added payment for ${credit.contract_number}, period ${payment.periodNumber}, month ${monthStr}`);
+            } else {
+              console.log(`[FORECAST DEBUG] Skipping paid period ${payment.periodNumber} for credit ${credit.contract_number}`);
+            }
           }
         }
         
@@ -3052,6 +3050,9 @@ app.get('/api/reports/forecast', async (req, res) => {
         // Продолжаем обработку других кредитов
       }
     }
+    
+    // Сортируем результат по месяцу для порядка
+    forecastItems.sort((a, b) => a.month.localeCompare(b.month));
     
     console.log('[FORECAST DEBUG] Returning response with', forecastItems.length, 'items');
     console.log('[FORECAST DEBUG] First item:', forecastItems[0]);
@@ -3088,7 +3089,7 @@ app.get('/api/reports/portfolio', async (req, res) => {
       });
     }
 
-    // Get individual credit details with bank names and payment aggregation
+    // Get individual credit details with bank names
     let query = `
       SELECT 
         c.id,
@@ -3096,15 +3097,9 @@ app.get('/api/reports/portfolio', async (req, res) => {
         c.principal,
         c.start_date,
         b.id as bank_id,
-        b.name as bank_name,
-        COALESCE(p.total_paid, 0) as paid_amount
+        b.name as bank_name
       FROM credits c
       LEFT JOIN banks b ON c.bank_id = b.id
-      LEFT JOIN (
-        SELECT credit_id, SUM(amount) as total_paid
-        FROM payments
-        GROUP BY credit_id
-      ) p ON c.id = p.credit_id
       WHERE c.principal > 0
     `;
     
@@ -3150,8 +3145,24 @@ app.get('/api/reports/portfolio', async (req, res) => {
         };
       }
       
-      const paidAmount = parseFloat(credit.paid_amount || 0);
       const principal = parseFloat(credit.principal || 0);
+      
+      // Рассчитываем реальный остаток на дату отчета из таблицы credit_payment
+      let paidAmount = 0;
+      const reportDate = dateTo || new Date().toISOString().slice(0, 10);
+      
+      try {
+        const paidQuery = `
+          SELECT COALESCE(SUM(principal_due), 0) as total_principal_paid
+          FROM credit_payment 
+          WHERE credit_id = $1 AND status = 'paid' AND due_date <= $2
+        `;
+        const paidResult = await pool.query(paidQuery, [credit.id, reportDate]);
+        paidAmount = parseFloat(paidResult.rows[0].total_principal_paid || 0);
+      } catch (error) {
+        console.error(`Error calculating balance for credit ${credit.id}:`, error);
+      }
+      
       const remainingBalance = principal - paidAmount;
       
       // Get current rate for this credit

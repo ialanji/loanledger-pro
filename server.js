@@ -587,6 +587,84 @@ app.get('/api/test/forecast-data', async (req, res) => {
   }
 });
 
+// Test endpoint for debugging schedule generation
+app.get('/api/test/schedule/:creditId', async (req, res) => {
+  try {
+    const { creditId } = req.params;
+    
+    // Получаем кредит
+    const creditResult = await pool.query(`
+      SELECT 
+        c.id,
+        c.contract_number,
+        c.principal,
+        c.term_months,
+        c.start_date,
+        c.method,
+        c.deferment_months,
+        c.payment_day
+      FROM credits c
+      WHERE c.id = $1
+    `, [creditId]);
+    
+    if (creditResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Credit not found' });
+    }
+    
+    const credit = creditResult.rows[0];
+    
+    // Получаем ставки
+    const ratesResult = await pool.query(`
+      SELECT rate, effective_date 
+      FROM credit_rates 
+      WHERE credit_id = $1 
+      ORDER BY effective_date ASC
+    `, [creditId]);
+    
+    let rates = ratesResult.rows.map(row => ({
+      annualPercent: parseFloat(row.rate) * 100,
+      effectiveDate: new Date(row.effective_date)
+    }));
+    
+    // Если нет ставок, используем базовую ставку 12%
+    if (rates.length === 0) {
+      rates = [{
+        annualPercent: 12.0,
+        effectiveDate: new Date(credit.start_date)
+      }];
+    }
+    
+    // Подготавливаем данные кредита для ScheduleEngine
+    const creditData = {
+      id: credit.id,
+      principal: parseFloat(credit.principal),
+      termMonths: credit.term_months,
+      startDate: new Date(credit.start_date),
+      method: credit.method,
+      defermentMonths: credit.deferment_months || 0,
+      paymentDay: credit.payment_day
+    };
+    
+    // Генерируем график платежей
+    const scheduleResponse = ScheduleEngine.generatePaymentScheduleResponse(
+      creditData,
+      rates,
+      []
+    );
+    
+    res.json({
+      credit: creditData,
+      rates: rates,
+      schedule: scheduleResponse.schedule.slice(0, 12), // Первые 12 платежей
+      scheduleLength: scheduleResponse.schedule.length,
+      hasSchedule: scheduleResponse.schedule.length > 0
+    });
+  } catch (error) {
+    console.error('Schedule test error:', error);
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
 // Get import logs
 app.get('/api/import-logs', async (req, res) => {
   try {

@@ -146,6 +146,12 @@ export default function Reports() {
   const handleGenerateReport = async () => {
     if (!selectedReport) return;
 
+    // Валидация диапазона дат
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      setError('Дата начала не может быть больше даты окончания');
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -279,6 +285,16 @@ export default function Reports() {
 
       case 'forecast':
         const forecastData = reportData as ForecastReportData;
+        
+        // Проверка на пустые результаты
+        if (!forecastData.items || forecastData.items.length === 0) {
+          return (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">Нет данных для отображения</p>
+              <p className="text-sm text-muted-foreground mt-2">Попробуйте изменить параметры фильтрации</p>
+            </div>
+          );
+        }
         
         // Calculate totals
         const totalPrincipal = forecastData.items.reduce((sum, item) => sum + (item.principalAmount || 0), 0);
@@ -422,6 +438,17 @@ export default function Reports() {
 
       case 'portfolio':
           const portfolioData = reportData as PortfolioReportData;
+          
+          // Проверка на пустые результаты
+          if (!portfolioData.items || portfolioData.items.length === 0) {
+            return (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">Нет данных для отображения</p>
+                <p className="text-sm text-muted-foreground mt-2">Попробуйте изменить параметры фильтрации</p>
+              </div>
+            );
+          }
+          
           return (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -449,18 +476,65 @@ export default function Reports() {
                       <th>Средняя ставка</th>
                       <th>Выплачено</th>
                       <th>Остаток</th>
+                      <th>Действия</th>
                     </tr>
                   </thead>
                   <tbody>
                     {portfolioData.items.map((item, index) => (
-                      <tr key={index}>
-                        <td className="font-medium">{item.bank}</td>
-                        <td>{item.creditCount}</td>
-                        <td className="financial-amount">{formatCurrency(item.totalPrincipal)}</td>
-                        <td>{item.avgRate.toFixed(2)}%</td>
-                        <td className="financial-amount positive">{formatCurrency(item.totalPaid)}</td>
-                        <td className="financial-amount">{formatCurrency(item.remainingBalance)}</td>
-                      </tr>
+                      <React.Fragment key={index}>
+                        <tr>
+                          <td className="font-medium">{item.bank}</td>
+                          <td>{item.creditCount}</td>
+                          <td className="financial-amount">{formatCurrency(item.totalPrincipal)}</td>
+                          <td>{item.avgRate.toFixed(2)}%</td>
+                          <td className="financial-amount positive">{formatCurrency(item.totalPaid)}</td>
+                          <td className="financial-amount">{formatCurrency(item.remainingBalance)}</td>
+                          <td>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => toggleBankCredits(item.bank)}
+                              className="text-xs"
+                            >
+                              {expandedBanks[item.bank] ? 'Скрыть кредиты' : 'Показать кредиты'}
+                            </Button>
+                          </td>
+                        </tr>
+                        {expandedBanks[item.bank] && item.credits && (
+                          <tr>
+                            <td colSpan={7} className="p-0">
+                              <div className="bg-gray-50 p-4">
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="border-b">
+                                      <th className="text-left py-2">Номер договора</th>
+                                      <th className="text-left py-2">Основная сумма</th>
+                                      <th className="text-left py-2">Остаток</th>
+                                      <th className="text-left py-2">Ставка</th>
+                                      <th className="text-left py-2">Выплачено</th>
+                                      <th className="text-left py-2">Дата начала</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {item.credits
+                                      .sort((a, b) => (a.contractNumber || '').localeCompare(b.contractNumber || ''))
+                                      .map((credit, creditIndex) => (
+                                        <tr key={creditIndex} className="border-b border-gray-200">
+                                          <td className="py-2 font-medium">{credit.contractNumber}</td>
+                                          <td className="py-2">{formatCurrency(credit.principal)}</td>
+                                          <td className="py-2">{formatCurrency(credit.remainingBalance)}</td>
+                                          <td className="py-2">{credit.rate.toFixed(2)}%</td>
+                                          <td className="py-2">{formatCurrency(credit.paidAmount)}</td>
+                                          <td className="py-2">{formatDate(new Date(credit.startDate))}</td>
+                                        </tr>
+                                      ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>

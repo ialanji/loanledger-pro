@@ -2864,7 +2864,7 @@ app.get('/api/reports/forecast', async (req, res) => {
         b.name as bank_name
       FROM credits c
       LEFT JOIN banks b ON c.bank_id = b.id
-      WHERE c.principal > 0
+      WHERE CAST(c.principal AS DECIMAL) > 0
     `;
     
     const params = [];
@@ -2889,7 +2889,13 @@ app.get('/api/reports/forecast', async (req, res) => {
       paramIndex++;
     }
     
+    console.log('[FORECAST DEBUG] Final query:', query);
+    console.log('[FORECAST DEBUG] Query params:', params);
+    
     const result = await pool.query(query, params);
+    
+    console.log('[FORECAST DEBUG] Credits found:', result.rows.length);
+    console.log('[FORECAST DEBUG] First credit:', result.rows[0]);
     
     // Генерируем детальный прогноз на следующие 12 месяцев используя реальный график платежей
     const now = new Date();

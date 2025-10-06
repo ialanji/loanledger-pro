@@ -12,15 +12,6 @@ import { Plus, Search, Wallet, TrendingUp, TrendingDown, ArrowUpRight, ArrowDown
 import { formatCurrency, formatDate } from '@/utils/formatters';
 
 // Удалены моки - данные будут загружаться из API
-    type: 'Расход',
-    amount: 12000,
-    source: 'Аренда офиса',
-    method: 'Банковский перевод',
-    category: 'Аренда',
-    description: 'Месячная аренда за январь',
-    balance: 127500
-  }
-];
 
 const typeConfig = {
   'Приход': { 

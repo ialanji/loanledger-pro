@@ -56,7 +56,7 @@ interface Bank {
   name: string;
 }
 
-// Utility function to transform forecast data into pivot table format
+// Утилитарная функция для трансформации данных прогноза в формат сводной таблицы
 const transformToPivotTable = (items: any[]) => {
   const pivotData: Record<string, {
     year: number;
@@ -65,9 +65,9 @@ const transformToPivotTable = (items: any[]) => {
     totals: { principal: number; interest: number };
   }> = {};
 
-  // Group data by year/month
+  // Группируем данные по году/месяцу
   items.forEach(item => {
-    const key = item.month; // Format: "2024-01"
+    const key = item.month; // Формат: "2024-01"
     const [year, monthNum] = key.split('-');
     const monthName = new Date(parseInt(year), parseInt(monthNum) - 1).toLocaleDateString('ru-RU', { 
       year: 'numeric', 
@@ -83,45 +83,47 @@ const transformToPivotTable = (items: any[]) => {
       };
     }
 
-    // Initialize bank data if not exists
+    // Инициализируем данные банка, если их нет
     if (!pivotData[key].banks[item.bank]) {
       pivotData[key].banks[item.bank] = { principal: 0, interest: 0 };
     }
 
-    // Aggregate amounts by bank
+    // Агрегируем суммы по банкам
     pivotData[key].banks[item.bank].principal += item.principalAmount || 0;
     pivotData[key].banks[item.bank].interest += item.interestAmount || 0;
 
-    // Update totals
+    // Обновляем общие итоги
     pivotData[key].totals.principal += item.principalAmount || 0;
     pivotData[key].totals.interest += item.interestAmount || 0;
   });
 
-  // Convert to array and sort by year/month
+  // Преобразуем в массив и сортируем по году/месяцу
   return Object.entries(pivotData)
     .map(([key, data]) => ({ key, ...data }))
     .sort((a, b) => a.key.localeCompare(b.key));
 };
 
-// Extract unique bank names from forecast data
+// Извлекаем уникальные названия банков из данных прогноза
 const getUniqueBankNames = (items: any[]) => {
   const bankNames = [...new Set(items.map(item => item.bank))];
-  return bankNames.sort(); // Sort alphabetically for consistent display
+  return bankNames.sort(); // Сортируем по алфавиту для консистентного отображения
 };
 
 export default function Reports() {
-  const [selectedReport, setSelectedReport] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [selectedBank, setSelectedBank] = useState('all');
-  const [exportFormat, setExportFormat] = useState('pdf');
-  const [reportForm, setReportForm] = useState<'list' | 'table'>('list');
-  const [expandedBanks, setExpandedBanks] = useState<Record<string, boolean>>({});
-  const [banks, setBanks] = useState<Bank[]>([]);
-  const [reportData, setReportData] = useState<OverdueReportData | ForecastReportData | PortfolioReportData | InterestReportData | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  // Основные состояния компонента
+  const [selectedReport, setSelectedReport] = useState(''); // Выбранный тип отчета
+  const [dateFrom, setDateFrom] = useState(''); // Дата начала фильтра
+  const [dateTo, setDateTo] = useState(''); // Дата окончания фильтра
+  const [selectedBank, setSelectedBank] = useState('all'); // Выбранный банк для фильтрации
+  const [exportFormat, setExportFormat] = useState('pdf'); // Формат экспорта
+  const [reportForm, setReportForm] = useState<'list' | 'table'>('list'); // Форма отчета (список/таблица)
+  const [expandedBanks, setExpandedBanks] = useState<Record<string, boolean>>({}); // Состояние раскрытых банков в портфельном отчете
+  const [banks, setBanks] = useState<Bank[]>([]); // Список банков
+  const [reportData, setReportData] = useState<OverdueReportData | ForecastReportData | PortfolioReportData | InterestReportData | null>(null); // Данные отчета
+  const [loading, setLoading] = useState<boolean>(false); // Состояние загрузки
+  const [error, setError] = useState<string | null>(null); // Ошибки
 
+  // Функция для переключения отображения кредитов банка в портфельном отчете
   const toggleBankCredits = (bankName: string) => {
     setExpandedBanks(prev => ({
       ...prev,
@@ -284,7 +286,7 @@ export default function Reports() {
         const totalAmount = forecastData.items.reduce((sum, item) => sum + (item.totalAmount || 0), 0);
         
         if (reportForm === 'list') {
-          // List view - existing table structure
+          // Списочный вид - существующая структура таблицы
           return (
             <div className="space-y-4">
               <div className="overflow-x-auto">
@@ -324,11 +326,11 @@ export default function Reports() {
             </div>
           );
         } else {
-          // Table view - pivot table format
+          // Табличный вид - формат сводной таблицы
           const pivotData = transformToPivotTable(forecastData.items);
           const uniqueBanks = getUniqueBankNames(forecastData.items);
           
-          // Calculate grand totals
+          // Вычисляем общие итоги
           const grandTotals = {
             principal: pivotData.reduce((sum, row) => sum + row.totals.principal, 0),
             interest: pivotData.reduce((sum, row) => sum + row.totals.interest, 0),
@@ -346,7 +348,7 @@ export default function Reports() {
               <div className="overflow-x-auto">
                 <table className="finance-table">
                   <thead>
-                    {/* First header row - bank names */}
+                    {/* Первый ряд заголовков - названия банков */}
                     <tr>
                       <th rowSpan={2}>Год</th>
                       <th rowSpan={2}>Месяц</th>
@@ -355,7 +357,7 @@ export default function Reports() {
                       ))}
                       <th colSpan={2} className="text-center">Итого</th>
                     </tr>
-                    {/* Second header row - principal/interest columns */}
+                    {/* Второй ряд заголовков - колонки остатка долга/процентов */}
                     <tr>
                       {uniqueBanks.map(bank => (
                         <React.Fragment key={bank}>

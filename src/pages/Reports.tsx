@@ -103,6 +103,78 @@ const transformToPivotTable = (items: any[]) => {
     .sort((a, b) => a.key.localeCompare(b.key));
 };
 
+// Утилитарная функция для трансформации данных прогноза в формат группировки по годам
+const transformToYearlyPivotTable = (items: any[]) => {
+  // Группируем данные по году
+  const yearMap = new Map<string, {
+    year: number;
+    months: Record<string, {
+      month: string;
+      monthName: string;
+      banks: Record<string, { principal: number; interest: number }>;
+      totals: { principal: number; interest: number };
+    }>;
+    totals: { principal: number; interest: number };
+  }>();
+
+  items.forEach(item => {
+    const [yearStr, monthStr] = item.month.split('-');
+    const year = parseInt(yearStr);
+    const monthKey = item.month; // "2025-10"
+    const monthName = new Date(year, parseInt(monthStr) - 1).toLocaleDateString('ru-RU', { 
+      month: 'long' 
+    });
+
+    if (!yearMap.has(yearStr)) {
+      yearMap.set(yearStr, {
+        year,
+        months: {},
+        totals: { principal: 0, interest: 0 }
+      });
+    }
+
+    const yearData = yearMap.get(yearStr)!;
+    
+    if (!yearData.months[monthKey]) {
+      yearData.months[monthKey] = {
+        month: monthStr,
+        monthName,
+        banks: {},
+        totals: { principal: 0, interest: 0 }
+      };
+    }
+
+    // Инициализируем данные банка, если их нет
+    if (!yearData.months[monthKey].banks[item.bank]) {
+      yearData.months[monthKey].banks[item.bank] = { principal: 0, interest: 0 };
+    }
+
+    // Агрегируем суммы по банкам
+    yearData.months[monthKey].banks[item.bank].principal += item.principalAmount || 0;
+    yearData.months[monthKey].banks[item.bank].interest += item.interestAmount || 0;
+
+    // Обновляем общие итоги месяца
+    yearData.months[monthKey].totals.principal += item.principalAmount || 0;
+    yearData.months[monthKey].totals.interest += item.interestAmount || 0;
+
+    // Обновляем общие итоги года
+    yearData.totals.principal += item.principalAmount || 0;
+    yearData.totals.interest += item.interestAmount || 0;
+  });
+
+  // Преобразуем в массив и сортируем по году
+  return Array.from(yearMap.entries())
+    .map(([yearStr, data]) => ({ 
+      yearStr, 
+      ...data,
+      // Сортируем месяцы внутри года
+      monthsArray: Object.entries(data.months)
+        .map(([key, monthData]) => ({ key, ...monthData }))
+        .sort((a, b) => a.key.localeCompare(b.key))
+    }))
+    .sort((a, b) => a.year - b.year);
+};
+
 // Извлекаем уникальные названия банков из данных прогноза
 const getUniqueBankNames = (items: any[]) => {
   const bankNames = [...new Set(items.map(item => item.bank))];
@@ -342,95 +414,153 @@ export default function Reports() {
             </div>
           );
         } else {
-          // Табличный вид - формат сводной таблицы
-          const pivotData = transformToPivotTable(forecastData.items);
+          // Табличный вид - группировка по годам
+          const yearlyPivotData = transformToYearlyPivotTable(forecastData.items);
           const uniqueBanks = getUniqueBankNames(forecastData.items);
           
-          // Вычисляем общие итоги
+          // Вычисляем общие итоги по всем годам
           const grandTotals = {
-            principal: pivotData.reduce((sum, row) => sum + row.totals.principal, 0),
-            interest: pivotData.reduce((sum, row) => sum + row.totals.interest, 0),
+            principal: yearlyPivotData.reduce((sum, year) => sum + year.totals.principal, 0),
+            interest: yearlyPivotData.reduce((sum, year) => sum + year.totals.interest, 0),
             banks: uniqueBanks.reduce((acc, bank) => {
               acc[bank] = {
-                principal: pivotData.reduce((sum, row) => sum + (row.banks[bank]?.principal || 0), 0),
-                interest: pivotData.reduce((sum, row) => sum + (row.banks[bank]?.interest || 0), 0)
+                principal: yearlyPivotData.reduce((sum, year) => {
+                  return sum + year.monthsArray.reduce((monthSum, month) => {
+                    return monthSum + (month.banks[bank]?.principal || 0);
+                  }, 0);
+                }, 0),
+                interest: yearlyPivotData.reduce((sum, year) => {
+                  return sum + year.monthsArray.reduce((monthSum, month) => {
+                    return monthSum + (month.banks[bank]?.interest || 0);
+                  }, 0);
+                }, 0)
               };
               return acc;
             }, {} as Record<string, { principal: number; interest: number }>)
           };
 
           return (
-            <div className="space-y-4">
-              <div className="overflow-x-auto">
-                <table className="finance-table">
-                  <thead>
-                    {/* Первый ряд заголовков - названия банков */}
-                    <tr>
-                      <th rowSpan={2}>Год</th>
-                      <th rowSpan={2}>Месяц</th>
-                      {uniqueBanks.map(bank => (
-                        <th key={bank} colSpan={2} className="text-center">{bank}</th>
-                      ))}
-                      <th colSpan={2} className="text-center">Итого</th>
-                    </tr>
-                    {/* Второй ряд заголовков - колонки остатка долга/процентов */}
-                    <tr>
-                      {uniqueBanks.map(bank => (
-                        <React.Fragment key={bank}>
+            <div className="space-y-6">
+              {yearlyPivotData.map((yearData, yearIndex) => (
+                <div key={yearData.yearStr} className="border rounded-lg p-4">
+                  <h3 className="text-xl font-bold mb-4 text-primary">Год: {yearData.yearStr}</h3>
+                  <div className="overflow-x-auto">
+                    <table className="finance-table">
+                      <thead>
+                        {/* Первый ряд заголовков - названия банков */}
+                        <tr>
+                          <th rowSpan={2}>Месяц</th>
+                          {uniqueBanks.map(bank => (
+                            <th key={bank} colSpan={2} className="text-center">{bank}</th>
+                          ))}
+                          <th colSpan={2} className="text-center">Итого</th>
+                        </tr>
+                        {/* Второй ряд заголовков - колонки остатка долга/процентов */}
+                        <tr>
+                          {uniqueBanks.map(bank => (
+                            <React.Fragment key={bank}>
+                              <th>Остаток долга</th>
+                              <th>Проценты</th>
+                            </React.Fragment>
+                          ))}
                           <th>Остаток долга</th>
                           <th>Проценты</th>
-                        </React.Fragment>
-                      ))}
-                      <th>Остаток долга</th>
-                      <th>Проценты</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pivotData.map((row, index) => (
-                      <tr key={index}>
-                        <td>{row.year}</td>
-                        <td>{row.month}</td>
-                        {uniqueBanks.map(bank => (
-                          <React.Fragment key={bank}>
-                            <td className="financial-amount">
-                              {formatCurrency(row.banks[bank]?.principal || 0)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {yearData.monthsArray.map((monthData, monthIndex) => (
+                          <tr key={monthData.key}>
+                            <td className="font-medium">{monthData.monthName}</td>
+                            {uniqueBanks.map(bank => (
+                              <React.Fragment key={bank}>
+                                <td className="financial-amount">
+                                  {formatCurrency(monthData.banks[bank]?.principal || 0)}
+                                </td>
+                                <td className="financial-amount">
+                                  {formatCurrency(monthData.banks[bank]?.interest || 0)}
+                                </td>
+                              </React.Fragment>
+                            ))}
+                            <td className="financial-amount font-bold">
+                              {formatCurrency(monthData.totals.principal)}
                             </td>
-                            <td className="financial-amount">
-                              {formatCurrency(row.banks[bank]?.interest || 0)}
+                            <td className="financial-amount font-bold">
+                              {formatCurrency(monthData.totals.interest)}
                             </td>
-                          </React.Fragment>
+                          </tr>
                         ))}
-                        <td className="financial-amount font-bold">
-                          {formatCurrency(row.totals.principal)}
-                        </td>
-                        <td className="financial-amount font-bold">
-                          {formatCurrency(row.totals.interest)}
-                        </td>
+                      </tbody>
+                      <tfoot>
+                        <tr className="font-bold bg-blue-50">
+                          <td className="font-bold text-primary">Итого по году:</td>
+                          {uniqueBanks.map(bank => (
+                            <React.Fragment key={bank}>
+                              <td className="financial-amount font-bold">
+                                {formatCurrency(yearData.monthsArray.reduce((sum, month) => sum + (month.banks[bank]?.principal || 0), 0))}
+                              </td>
+                              <td className="financial-amount font-bold">
+                                {formatCurrency(yearData.monthsArray.reduce((sum, month) => sum + (month.banks[bank]?.interest || 0), 0))}
+                              </td>
+                            </React.Fragment>
+                          ))}
+                          <td className="financial-amount positive font-bold">
+                            {formatCurrency(yearData.totals.principal)}
+                          </td>
+                          <td className="financial-amount positive font-bold">
+                            {formatCurrency(yearData.totals.interest)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              ))}
+              
+              {/* Общие итоги по всем годам */}
+              <div className="border rounded-lg p-4 bg-gray-50">
+                <h3 className="text-xl font-bold mb-4 text-success">Общие итоги по всем годам</h3>
+                <div className="overflow-x-auto">
+                  <table className="finance-table">
+                    <thead>
+                      <tr>
+                        <th>Банк</th>
+                        <th>Остаток долга</th>
+                        <th>Проценты</th>
+                        <th>Всего</th>
                       </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="font-bold bg-gray-50">
-                      <td colSpan={2} className="font-bold">Итого:</td>
+                    </thead>
+                    <tbody>
                       {uniqueBanks.map(bank => (
-                        <React.Fragment key={bank}>
+                        <tr key={bank}>
+                          <td className="font-medium">{bank}</td>
                           <td className="financial-amount font-bold">
                             {formatCurrency(grandTotals.banks[bank]?.principal || 0)}
                           </td>
                           <td className="financial-amount font-bold">
                             {formatCurrency(grandTotals.banks[bank]?.interest || 0)}
                           </td>
-                        </React.Fragment>
+                          <td className="financial-amount positive font-bold">
+                            {formatCurrency((grandTotals.banks[bank]?.principal || 0) + (grandTotals.banks[bank]?.interest || 0))}
+                          </td>
+                        </tr>
                       ))}
-                      <td className="financial-amount positive font-bold">
-                        {formatCurrency(grandTotals.principal)}
-                      </td>
-                      <td className="financial-amount positive font-bold">
-                        {formatCurrency(grandTotals.interest)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
+                    </tbody>
+                    <tfoot>
+                      <tr className="font-bold bg-green-50">
+                        <td className="font-bold text-success">ИТОГО:</td>
+                        <td className="financial-amount positive font-bold">
+                          {formatCurrency(grandTotals.principal)}
+                        </td>
+                        <td className="financial-amount positive font-bold">
+                          {formatCurrency(grandTotals.interest)}
+                        </td>
+                        <td className="financial-amount positive font-bold text-lg">
+                          {formatCurrency(grandTotals.principal + grandTotals.interest)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               </div>
             </div>
           );

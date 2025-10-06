@@ -24,3 +24,11 @@ dist-ssr
 *.sw?
 
 credentials.json
+
+# Test results
+test-results/
+playwright-report/
+
+# Temporary files
+*— копия.txt
+*копия.txt

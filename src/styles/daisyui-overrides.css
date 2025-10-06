@@ -1,0 +1,157 @@
+/* daisyUI Integration Overrides
+ * This file contains CSS overrides to resolve conflicts between daisyUI and shadcn/ui
+ */
+
+/* Ensure daisyUI components respect the theme system */
+@layer components {
+  /* Fix daisyUI button focus states to work with our theme */
+  .btn:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Ensure daisyUI inputs work with our form validation styles */
+  .input:focus {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-color: hsl(var(--ring));
+  }
+
+  .input-error {
+    border-color: hsl(var(--destructive));
+  }
+
+  .input-error:focus {
+    outline-color: hsl(var(--destructive));
+    border-color: hsl(var(--destructive));
+  }
+
+  /* Ensure daisyUI cards work well with our color system */
+  .card {
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    border: 1px solid hsl(var(--border));
+  }
+
+  /* Fix daisyUI alert colors to match our theme */
+  .alert {
+    background-color: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    border: 1px solid hsl(var(--border));
+  }
+
+  .alert-info {
+    background-color: hsl(var(--primary) / 0.1);
+    color: hsl(var(--primary));
+    border-color: hsl(var(--primary) / 0.2);
+  }
+
+  .alert-success {
+    background-color: hsl(var(--success) / 0.1);
+    color: hsl(var(--success));
+    border-color: hsl(var(--success) / 0.2);
+  }
+
+  .alert-warning {
+    background-color: hsl(var(--warning) / 0.1);
+    color: hsl(var(--warning));
+    border-color: hsl(var(--warning) / 0.2);
+  }
+
+  .alert-error {
+    background-color: hsl(var(--destructive) / 0.1);
+    color: hsl(var(--destructive));
+    border-color: hsl(var(--destructive) / 0.2);
+  }
+
+  /* Ensure daisyUI stats work with our theme */
+  .stats {
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+  }
+
+  .stat-title {
+    color: hsl(var(--muted-foreground));
+  }
+
+  .stat-value {
+    color: hsl(var(--foreground));
+  }
+
+  .stat-desc {
+    color: hsl(var(--muted-foreground));
+  }
+
+  /* Fix daisyUI form controls */
+  .form-control .label-text {
+    color: hsl(var(--foreground));
+  }
+
+  .checkbox:checked {
+    background-color: hsl(var(--primary));
+    border-color: hsl(var(--primary));
+  }
+
+  .checkbox:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Ensure daisyUI badges work with our theme */
+  .badge {
+    background-color: hsl(var(--secondary));
+    color: hsl(var(--secondary-foreground));
+    border: 1px solid hsl(var(--border));
+  }
+
+  .badge-primary {
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    border-color: hsl(var(--primary));
+  }
+
+  .badge-secondary {
+    background-color: hsl(var(--secondary));
+    color: hsl(var(--secondary-foreground));
+    border-color: hsl(var(--secondary));
+  }
+
+  .badge-accent {
+    background-color: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
+    border-color: hsl(var(--accent));
+  }
+
+  .badge-error {
+    background-color: hsl(var(--destructive));
+    color: hsl(var(--destructive-foreground));
+    border-color: hsl(var(--destructive));
+  }
+}
+
+/* Prevent conflicts when both libraries are used on the same element */
+@layer utilities {
+  /* Reset conflicting styles when mixing libraries (not recommended but handled gracefully) */
+  .btn.inline-flex {
+    display: inline-flex !important;
+  }
+
+  .input.flex {
+    display: flex !important;
+  }
+}
+
+/* Dark mode specific overrides */
+@media (prefers-color-scheme: dark) {
+  .dark .card {
+    background-color: hsl(var(--card));
+  }
+
+  .dark .alert {
+    background-color: hsl(var(--muted));
+  }
+
+  .dark .stats {
+    background-color: hsl(var(--card));
+  }
+}

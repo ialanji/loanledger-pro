@@ -98,5 +98,13 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [require("tailwindcss-animate"), require("daisyui")],
+  daisyui: {
+    base: false, // Disable daisyUI base styles to prevent conflicts with shadcn/ui
+    themes: ["light", "dark"], // Match existing theme system
+    darkTheme: "dark", // Set dark theme name
+    styled: true, // Enable component styling
+    utils: true, // Enable utility classes
+    logs: false, // Disable console logs
+  },
 } satisfies Config;

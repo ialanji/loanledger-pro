@@ -1,3 +1,6 @@
+/* daisyUI integration overrides */
+@import './styles/daisyui-overrides.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

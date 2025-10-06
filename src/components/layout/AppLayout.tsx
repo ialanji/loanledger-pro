@@ -19,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useImportSLO } from '@/hooks/useImportSLO';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -233,6 +234,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
                 {slo.isLoading ? 'обновление…' : statusLabel(slo.overallStatus)}
               </span>
             </div>
+            <ThemeToggle />
             <div className="text-right">
               <p className="text-sm font-medium"></p>
               <p className="text-xs text-muted-foreground">Система учёта финансов</p>

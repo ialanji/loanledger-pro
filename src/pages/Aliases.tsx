@@ -119,22 +119,22 @@ export default function Aliases() {
   const { toast } = useToast()
 
   const currentData = activeTab === 'departments' ? departments : suppliers
-  
+
   const filteredDepartments = departments.filter(item => {
     const matchesSearch = item.source_value.toLowerCase().includes(search.toLowerCase()) ||
-                         item.normalized_value.toLowerCase().includes(search.toLowerCase())
-    const matchesFilter = filter === 'all' || 
-                         (filter === 'groups' && item.is_group) ||
-                         (filter === 'items' && !item.is_group)
+      item.normalized_value.toLowerCase().includes(search.toLowerCase())
+    const matchesFilter = filter === 'all' ||
+      (filter === 'groups' && item.is_group) ||
+      (filter === 'items' && !item.is_group)
     return matchesSearch && matchesFilter
   })
 
   const filteredSuppliers = suppliers.filter(item => {
     const matchesSearch = item.source_value.toLowerCase().includes(search.toLowerCase()) ||
-                         item.normalized_value.toLowerCase().includes(search.toLowerCase())
-    const matchesFilter = filter === 'all' || 
-                         (filter === 'groups' && item.is_group) ||
-                         (filter === 'items' && !item.is_group)
+      item.normalized_value.toLowerCase().includes(search.toLowerCase())
+    const matchesFilter = filter === 'all' ||
+      (filter === 'groups' && item.is_group) ||
+      (filter === 'items' && !item.is_group)
     return matchesSearch && matchesFilter
   })
 
@@ -212,16 +212,16 @@ export default function Aliases() {
 
     setDeleting(true)
     try {
-      await Promise.all([...selectedIds].map(id => 
+      await Promise.all([...selectedIds].map(id =>
         fetch(`/api/aliases/${id}`, { method: 'DELETE' })
       ))
-      
+
       if (activeTab === 'departments') {
         setDepartments(departments.filter(d => !selectedIds.has(d.id)))
       } else {
         setSuppliers(suppliers.filter(s => !selectedIds.has(s.id)))
       }
-      
+
       setSelectedIds(new Set())
       toast({
         title: "Успешно",
@@ -243,7 +243,7 @@ export default function Aliases() {
     try {
       const response = await fetch(`/api/aliases/export?type=${type}`)
       const data = await response.json()
-      
+
       const headers = ['ID', 'Исходное значение', 'Нормализованное значение', 'Группа', 'Создано']
       const csvContent = [
         headers.join(','),
@@ -308,13 +308,13 @@ export default function Aliases() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         })
-        
+
         if (activeTab === 'departments') {
           setDepartments(departments.map(d => d.id === editing.id ? { ...d, ...payload } : d))
         } else {
           setSuppliers(suppliers.map(s => s.id === editing.id ? { ...s, ...payload } : s))
         }
-        
+
         toast({
           title: "Успешно",
           description: "Алиас обновлен",
@@ -326,19 +326,19 @@ export default function Aliases() {
           body: JSON.stringify(payload)
         })
         const newAlias = await response.json()
-        
+
         if (activeTab === 'departments') {
           setDepartments([...departments, newAlias])
         } else {
           setSuppliers([...suppliers, newAlias])
         }
-        
+
         toast({
           title: "Успешно",
           description: "Алиас создан",
         })
       }
-      
+
       setDialogOpen(false)
       setEditing(null)
       setForm({ source_value: '', normalized_value: '', is_group: false })
@@ -361,19 +361,19 @@ export default function Aliases() {
           fetch('/api/aliases?type=department'),
           fetch('/api/aliases?type=supplier')
         ])
-        
+
         const [deptData, suppData] = await Promise.all([
           deptResponse.json(),
           suppResponse.json()
         ])
-        
+
         setDepartments(deptData)
         setSuppliers(suppData)
       } catch (error) {
         console.error('Load aliases failed', error)
       }
     }
-    
+
     loadAliases()
   }, [])
 

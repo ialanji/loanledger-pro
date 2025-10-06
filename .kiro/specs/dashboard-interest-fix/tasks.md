@@ -52,9 +52,24 @@
 
 - [x] 4.1 Test dashboard with corrected frontend implementation
 
-
   - Restart server to ensure backend changes are active
   - Verify dashboard loads 2 active credits
   - Confirm historical payments endpoint returns 32 paid payments
   - Validate final projected interest calculation shows ~186,301 L
   - _Requirements: 1.2, 2.1, 2.3_
+
+- [x] 5. Redesign credit information block for better UX
+
+- [x] 5.1 Implement improved credit information layout
+
+  - ✅ Fixed data contradictions and terminology issues
+  - ✅ Separated "Общая сумма кредита" from "Остаток основного долга"
+  - ✅ Added clear distinction between principal debt and interest
+  - ✅ Implemented "Общая сумма к выплате" as principal + interest
+  - ✅ Added visual progress bar for debt repayment progress
+  - ✅ Improved color coding: green for principal, orange for interest, blue for totals
+  - ✅ Added emoji icons for better visual hierarchy
+  - ✅ Restructured into logical left/right columns: basic info vs. payment details
+  - ✅ Fixed currency display (L instead of ₽ for Moldova)
+  - ✅ Removed unused imports and cleaned up code
+  - _Requirements: UX improvement, data accuracy, visual clarity_

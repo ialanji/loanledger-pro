@@ -4,30 +4,21 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { 
-  FileText, 
-  Download, 
-  Calendar, 
+import {
+  FileText,
+  Download,
+  Calendar,
   Filter,
   BarChart3,
   TrendingUp,
-  AlertTriangle,
-  DollarSign,
   FileSpreadsheet,
   FileBarChart,
   Loader2
 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/utils/formatters';
-import { reportsService, type OverdueReportData, type ForecastReportData, type PortfolioReportData, type InterestReportData, type ReportFilters } from '@/services/reportsService';
+import { reportsService, type ForecastReportData, type PortfolioReportData, type ReportFilters } from '@/services/reportsService';
 
 const reportTypes = [
-  {
-    id: 'overdue',
-    title: 'Отчет по просрочкам',
-    description: 'Список просроченных платежей и анализ задолженности',
-    icon: AlertTriangle,
-    color: 'text-destructive'
-  },
   {
     id: 'forecast',
     title: 'Прогноз платежей',
@@ -41,13 +32,6 @@ const reportTypes = [
     description: 'Анализ кредитного портфеля по банкам и типам кредитов',
     icon: BarChart3,
     color: 'text-accent'
-  },
-  {
-    id: 'interest',
-    title: 'Анализ процентов',
-    description: 'Начисленные и полученные проценты за период',
-    icon: DollarSign,
-    color: 'text-warning'
   }
 ];
 
@@ -69,9 +53,9 @@ const transformToPivotTable = (items: any[]) => {
   items.forEach(item => {
     const key = item.month; // Формат: "2024-01"
     const [year, monthNum] = key.split('-');
-    const monthName = new Date(parseInt(year), parseInt(monthNum) - 1).toLocaleDateString('ru-RU', { 
-      year: 'numeric', 
-      month: 'long' 
+    const monthName = new Date(parseInt(year), parseInt(monthNum) - 1).toLocaleDateString('ru-RU', {
+      year: 'numeric',
+      month: 'long'
     });
 
     if (!pivotData[key]) {
@@ -121,8 +105,8 @@ const transformToYearlyPivotTable = (items: any[]) => {
     const [yearStr, monthStr] = item.month.split('-');
     const year = parseInt(yearStr);
     const monthKey = item.month; // "2025-10"
-    const monthName = new Date(year, parseInt(monthStr) - 1).toLocaleDateString('ru-RU', { 
-      month: 'long' 
+    const monthName = new Date(year, parseInt(monthStr) - 1).toLocaleDateString('ru-RU', {
+      month: 'long'
     });
 
     if (!yearMap.has(yearStr)) {
@@ -134,7 +118,7 @@ const transformToYearlyPivotTable = (items: any[]) => {
     }
 
     const yearData = yearMap.get(yearStr)!;
-    
+
     if (!yearData.months[monthKey]) {
       yearData.months[monthKey] = {
         month: monthStr,
@@ -164,8 +148,8 @@ const transformToYearlyPivotTable = (items: any[]) => {
 
   // Преобразуем в массив и сортируем по году
   return Array.from(yearMap.entries())
-    .map(([yearStr, data]) => ({ 
-      yearStr, 
+    .map(([yearStr, data]) => ({
+      yearStr,
       ...data,
       // Сортируем месяцы внутри года
       monthsArray: Object.entries(data.months)
@@ -191,7 +175,7 @@ export default function Reports() {
   const [reportForm, setReportForm] = useState<'list' | 'table'>('list'); // Форма отчета (список/таблица)
   const [expandedBanks, setExpandedBanks] = useState<Record<string, boolean>>({}); // Состояние раскрытых банков в портфельном отчете
   const [banks, setBanks] = useState<Bank[]>([]); // Список банков
-  const [reportData, setReportData] = useState<OverdueReportData | ForecastReportData | PortfolioReportData | InterestReportData | null>(null); // Данные отчета
+  const [reportData, setReportData] = useState<ForecastReportData | PortfolioReportData | null>(null); // Данные отчета
   const [loading, setLoading] = useState<boolean>(false); // Состояние загрузки
   const [error, setError] = useState<string | null>(null); // Ошибки
 
@@ -236,17 +220,11 @@ export default function Reports() {
 
       let data;
       switch (selectedReport) {
-        case 'overdue':
-          data = await reportsService.getOverdueReport(filters);
-          break;
         case 'forecast':
           data = await reportsService.getForecastReport(filters);
           break;
         case 'portfolio':
           data = await reportsService.getPortfolioReport(filters);
-          break;
-        case 'interest':
-          data = await reportsService.getInterestReport(filters);
           break;
         default:
           throw new Error('Unknown report type');
@@ -292,8 +270,8 @@ export default function Reports() {
       return (
         <div className="text-center py-8">
           <p className="text-destructive">{error}</p>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={handleGenerateReport}
             className="mt-4"
           >
@@ -312,52 +290,9 @@ export default function Reports() {
     }
 
     switch (selectedReport) {
-      case 'overdue':
-        const overdueData = reportData as OverdueReportData;
-        return (
-          <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-destructive/10 p-4 rounded-lg">
-                <h4 className="font-semibold text-destructive">Общая сумма</h4>
-                <p className="text-2xl font-bold">{formatCurrency(overdueData.totalAmount)}</p>
-              </div>
-              <div className="bg-warning/10 p-4 rounded-lg">
-                <h4 className="font-semibold">Количество</h4>
-                <p className="text-2xl font-bold">{overdueData.count}</p>
-              </div>
-              <div className="bg-muted p-4 rounded-lg">
-                <h4 className="font-semibold">Средний срок</h4>
-                <p className="text-2xl font-bold">{overdueData.averageDays} дней</p>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="finance-table">
-                <thead>
-                  <tr>
-                    <th>Договор</th>
-                    <th>Сумма просрочки</th>
-                    <th>Дней просрочки</th>
-                    <th>Банк</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {overdueData.items.map((item, index) => (
-                    <tr key={index}>
-                      <td className="font-medium">{item.contract}</td>
-                      <td className="financial-amount negative">{formatCurrency(item.amount)}</td>
-                      <td>{item.days}</td>
-                      <td>{item.bank}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-
       case 'forecast':
         const forecastData = reportData as ForecastReportData;
-        
+
         // Проверка на пустые результаты
         if (!forecastData.items || forecastData.items.length === 0) {
           return (
@@ -367,12 +302,12 @@ export default function Reports() {
             </div>
           );
         }
-        
+
         // Calculate totals
         const totalPrincipal = forecastData.items.reduce((sum, item) => sum + (item.principalAmount || 0), 0);
         const totalInterest = forecastData.items.reduce((sum, item) => sum + (item.interestAmount || 0), 0);
         const totalAmount = forecastData.items.reduce((sum, item) => sum + (item.totalAmount || 0), 0);
-        
+
         if (reportForm === 'list') {
           // Списочный вид - существующая структура таблицы
           return (
@@ -417,7 +352,7 @@ export default function Reports() {
           // Табличный вид - группировка по годам
           const yearlyPivotData = transformToYearlyPivotTable(forecastData.items);
           const uniqueBanks = getUniqueBankNames(forecastData.items);
-          
+
           // Вычисляем общие итоги по всем годам
           const grandTotals = {
             principal: yearlyPivotData.reduce((sum, year) => sum + year.totals.principal, 0),
@@ -515,7 +450,7 @@ export default function Reports() {
                   </div>
                 </div>
               ))}
-              
+
               {/* Общие итоги по всем годам */}
               <div className="border rounded-lg p-4 bg-gray-50">
                 <h3 className="text-xl font-bold mb-4 text-success">Общие итоги по всем годам</h3>
@@ -567,159 +502,117 @@ export default function Reports() {
         }
 
       case 'portfolio':
-          const portfolioData = reportData as PortfolioReportData;
-          
-          // Проверка на пустые результаты
-          if (!portfolioData.items || portfolioData.items.length === 0) {
-            return (
-              <div className="text-center py-8">
-                <p className="text-muted-foreground">Нет данных для отображения</p>
-                <p className="text-sm text-muted-foreground mt-2">Попробуйте изменить параметры фильтрации</p>
-              </div>
-            );
-          }
-          
-          return (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-primary/10 p-4 rounded-lg">
-                  <h4 className="font-semibold text-primary">Общая сумма кредитов</h4>
-                  <p className="text-2xl font-bold">{formatCurrency(portfolioData.totalPrincipal)}</p>
-                </div>
-                <div className="bg-accent/10 p-4 rounded-lg">
-                  <h4 className="font-semibold text-accent">Количество кредитов</h4>
-                  <p className="text-2xl font-bold">{portfolioData.totalCredits}</p>
-                </div>
-                <div className="bg-success/10 p-4 rounded-lg">
-                  <h4 className="font-semibold text-success">Выплачено</h4>
-                  <p className="text-2xl font-bold">{formatCurrency(portfolioData.totalPaid)}</p>
-                </div>
-              </div>
-              
-              <div className="overflow-x-auto">
-                <table className="finance-table">
-                  <thead>
-                    <tr>
-                      <th>Банк</th>
-                      <th>Кредитов</th>
-                      <th>Основная сумма</th>
-                      <th>Средняя ставка</th>
-                      <th>Выплачено</th>
-                      <th>Остаток</th>
-                      <th>Действия</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {portfolioData.items.map((item, index) => (
-                      <React.Fragment key={index}>
-                        <tr>
-                          <td className="font-medium">{item.bank}</td>
-                          <td>{item.creditCount}</td>
-                          <td className="financial-amount">{formatCurrency(item.totalPrincipal)}</td>
-                          <td>{item.avgRate.toFixed(2)}%</td>
-                          <td className="financial-amount positive">{formatCurrency(item.totalPaid)}</td>
-                          <td className="financial-amount">{formatCurrency(item.remainingBalance)}</td>
-                          <td>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => toggleBankCredits(item.bank)}
-                              className="text-xs"
-                            >
-                              {expandedBanks[item.bank] ? 'Скрыть кредиты' : 'Показать кредиты'}
-                            </Button>
-                          </td>
-                        </tr>
-                        {expandedBanks[item.bank] && item.credits && (
-                          <tr>
-                            <td colSpan={7} className="p-0">
-                              <div className="bg-gray-50 p-4">
-                                <table className="w-full text-sm">
-                                  <thead>
-                                    <tr className="border-b">
-                                      <th className="text-left py-2">Номер договора</th>
-                                      <th className="text-left py-2">Основная сумма</th>
-                                      <th className="text-left py-2">Остаток</th>
-                                      <th className="text-left py-2">Ставка</th>
-                                      <th className="text-left py-2">Выплачено</th>
-                                      <th className="text-left py-2">Дата начала</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {item.credits
-                                      .sort((a, b) => (a.contractNumber || '').localeCompare(b.contractNumber || ''))
-                                      .map((credit, creditIndex) => (
-                                        <tr key={creditIndex} className="border-b border-gray-200">
-                                          <td className="py-2 font-medium">{credit.contractNumber}</td>
-                                          <td className="py-2">{formatCurrency(credit.principal)}</td>
-                                          <td className="py-2">{formatCurrency(credit.remainingBalance)}</td>
-                                          <td className="py-2">{credit.rate.toFixed(2)}%</td>
-                                          <td className="py-2">{formatCurrency(credit.paidAmount)}</td>
-                                          <td className="py-2">{formatDate(new Date(credit.startDate))}</td>
-                                        </tr>
-                                      ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          );
-        
-        case 'interest':
-          const interestData = reportData as InterestReportData;
-          return (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-primary/10 p-4 rounded-lg">
-                  <h4 className="font-semibold text-primary">Общий процентный доход</h4>
-                  <p className="text-2xl font-bold">{formatCurrency(interestData.totalInterest)}</p>
-                </div>
-                <div className="bg-accent/10 p-4 rounded-lg">
-                  <h4 className="font-semibold text-accent">Количество платежей</h4>
-                  <p className="text-2xl font-bold">{interestData.totalPayments}</p>
-                </div>
-              </div>
-              
-              <div className="overflow-x-auto">
-                <table className="finance-table">
-                  <thead>
-                    <tr>
-                      <th>Договор</th>
-                      <th>Банк</th>
-                      <th>Процентный доход</th>
-                      <th>Платежей</th>
-                      <th>Средняя ставка</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {interestData.items.map((item, index) => (
-                      <tr key={index}>
-                        <td className="font-medium">{item.contract}</td>
-                        <td>{item.bank}</td>
-                        <td className="financial-amount positive">{formatCurrency(item.totalInterest)}</td>
-                        <td>{item.paymentCount}</td>
-                        <td>{item.avgRate.toFixed(2)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          );
+        const portfolioData = reportData as PortfolioReportData;
 
-        default:
+        // Проверка на пустые результаты
+        if (!portfolioData.items || portfolioData.items.length === 0) {
           return (
             <div className="text-center py-8">
-              <p className="text-muted-foreground">Выберите тип отчета для просмотра данных</p>
+              <p className="text-muted-foreground">Нет данных для отображения</p>
+              <p className="text-sm text-muted-foreground mt-2">Попробуйте изменить параметры фильтрации</p>
             </div>
           );
+        }
+
+        return (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-primary/10 p-4 rounded-lg">
+                <h4 className="font-semibold text-primary">Общая сумма кредитов</h4>
+                <p className="text-2xl font-bold">{formatCurrency(portfolioData.totalPrincipal)}</p>
+              </div>
+              <div className="bg-accent/10 p-4 rounded-lg">
+                <h4 className="font-semibold text-accent">Количество кредитов</h4>
+                <p className="text-2xl font-bold">{portfolioData.totalCredits}</p>
+              </div>
+              <div className="bg-success/10 p-4 rounded-lg">
+                <h4 className="font-semibold text-success">Выплачено</h4>
+                <p className="text-2xl font-bold">{formatCurrency(portfolioData.totalPaid)}</p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="finance-table">
+                <thead>
+                  <tr>
+                    <th>Банк</th>
+                    <th>Кредитов</th>
+                    <th>Основная сумма</th>
+                    <th>Средняя ставка</th>
+                    <th>Выплачено</th>
+                    <th>Остаток</th>
+                    <th>Действия</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portfolioData.items.map((item, index) => (
+                    <React.Fragment key={index}>
+                      <tr>
+                        <td className="font-medium">{item.bank}</td>
+                        <td>{item.creditCount}</td>
+                        <td className="financial-amount">{formatCurrency(item.totalPrincipal)}</td>
+                        <td>{item.avgRate.toFixed(2)}%</td>
+                        <td className="financial-amount positive">{formatCurrency(item.totalPaid)}</td>
+                        <td className="financial-amount">{formatCurrency(item.remainingBalance)}</td>
+                        <td>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => toggleBankCredits(item.bank)}
+                            className="text-xs"
+                          >
+                            {expandedBanks[item.bank] ? 'Скрыть кредиты' : 'Показать кредиты'}
+                          </Button>
+                        </td>
+                      </tr>
+                      {expandedBanks[item.bank] && item.credits && (
+                        <tr>
+                          <td colSpan={7} className="p-0">
+                            <div className="bg-gray-50 p-4">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="border-b">
+                                    <th className="text-left py-2">Номер договора</th>
+                                    <th className="text-left py-2">Основная сумма</th>
+                                    <th className="text-left py-2">Остаток</th>
+                                    <th className="text-left py-2">Ставка</th>
+                                    <th className="text-left py-2">Выплачено</th>
+                                    <th className="text-left py-2">Дата начала</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {item.credits
+                                    .sort((a, b) => (a.contractNumber || '').localeCompare(b.contractNumber || ''))
+                                    .map((credit, creditIndex) => (
+                                      <tr key={creditIndex} className="border-b border-gray-200">
+                                        <td className="py-2 font-medium">{credit.contractNumber}</td>
+                                        <td className="py-2">{formatCurrency(credit.principal)}</td>
+                                        <td className="py-2">{formatCurrency(credit.remainingBalance)}</td>
+                                        <td className="py-2">{credit.rate.toFixed(2)}%</td>
+                                        <td className="py-2">{formatCurrency(credit.paidAmount)}</td>
+                                        <td className="py-2">{formatDate(new Date(credit.startDate))}</td>
+                                      </tr>
+                                    ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+
+      default:
+        return (
+          <div className="text-center py-8">
+            <p className="text-muted-foreground">Выберите тип отчета для просмотра данных</p>
+          </div>
+        );
     }
   };
 
@@ -738,11 +631,10 @@ export default function Reports() {
         {reportTypes.map((report) => {
           const Icon = report.icon;
           return (
-            <Card 
+            <Card
               key={report.id}
-              className={`cursor-pointer transition-all ${
-                selectedReport === report.id ? 'ring-2 ring-primary border-primary/50' : 'hover:shadow-md'
-              }`}
+              className={`cursor-pointer transition-all ${selectedReport === report.id ? 'ring-2 ring-primary border-primary/50' : 'hover:shadow-md'
+                }`}
               onClick={() => {
                 setSelectedReport(report.id);
                 setReportData(null);
@@ -827,7 +719,7 @@ export default function Reports() {
             )}
           </div>
           <div className="flex gap-2 mt-6">
-            <Button 
+            <Button
               onClick={handleGenerateReport}
               disabled={!selectedReport}
               className="btn-corporate gap-2"
@@ -835,7 +727,7 @@ export default function Reports() {
               <BarChart3 className="h-4 w-4" />
               Создать отчет
             </Button>
-            <Button 
+            <Button
               variant="outline"
               onClick={() => handleExport('excel')}
               disabled={!selectedReport}
@@ -844,7 +736,7 @@ export default function Reports() {
               <FileSpreadsheet className="h-4 w-4" />
               Excel
             </Button>
-            <Button 
+            <Button
               variant="outline"
               onClick={() => handleExport('pdf')}
               disabled={!selectedReport}

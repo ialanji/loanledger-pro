@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,43 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Search, Wallet, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/utils/formatters';
 
-const mockTransactions = [
-  {
-    id: '1',
-    date: new Date('2024-01-15'),
-    type: 'Приход',
-    amount: 30000,
-    source: 'Оплата по накладной INV-2024-001',
-    method: 'Банковский перевод',
-    category: 'Продажи',
-    description: 'Оплата от ООО "Молдавский Торговый Дом"',
-    balance: 155000
-  },
-  {
-    id: '2',
-    date: new Date('2024-01-14'),
-    type: 'Расход',
-    amount: 5000,
-    source: 'Закупка расходных материалов',
-    method: 'Наличные',
-    category: 'Материалы',
-    description: 'Канцелярские товары и расходники',
-    balance: 125000
-  },
-  {
-    id: '3',
-    date: new Date('2024-01-13'),
-    type: 'Приход',
-    amount: 2500,
-    source: 'Сервисное обслуживание',
-    method: 'Наличные',
-    category: 'Услуги',
-    description: 'Оплата от ИП Попович С.М.',
-    balance: 130000
-  },
-  {
-    id: '4',
-    date: new Date('2024-01-12'),
+// Удалены моки - данные будут загружаться из API
     type: 'Расход',
     amount: 12000,
     source: 'Аренда офиса',
@@ -73,12 +37,31 @@ const typeConfig = {
   }
 };
 
+interface Transaction {
+  id: string;
+  date: Date;
+  type: string;
+  amount: number;
+  source: string;
+  method: string;
+  category: string;
+  description: string;
+  balance: number;
+}
+
 export default function CashDesk() {
   const [searchTerm, setSearchTerm] = useState('');
   const [transactionType, setTransactionType] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
   
-  const filteredTransactions = mockTransactions.filter(transaction => {
+  useEffect(() => {
+    // TODO: Загрузка данных из API
+    setLoading(false);
+  }, []);
+  
+  const filteredTransactions = transactions.filter(transaction => {
     const matchesSearch = transaction.source.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          transaction.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          transaction.category.toLowerCase().includes(searchTerm.toLowerCase());
@@ -88,8 +71,8 @@ export default function CashDesk() {
     return matchesSearch && matchesType;
   });
 
-  const totalIncome = mockTransactions.filter(t => t.type === 'Приход').reduce((sum, t) => sum + t.amount, 0);
-  const totalExpense = mockTransactions.filter(t => t.type === 'Расход').reduce((sum, t) => sum + t.amount, 0);
+  const totalIncome = transactions.filter(t => t.type === 'Приход').reduce((sum, t) => sum + t.amount, 0);
+  const totalExpense = transactions.filter(t => t.type === 'Расход').reduce((sum, t) => sum + t.amount, 0);
   const currentBalance = totalIncome - totalExpense;
 
   return (

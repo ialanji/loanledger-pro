@@ -476,6 +476,23 @@ app.post('/api/expense-import/run', async (req, res) => {
 // Get all expenses
 app.get('/api/expenses', async (req, res) => {
   try {
+    // Создаем таблицу expenses если она не существует
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS expenses (
+        id SERIAL PRIMARY KEY,
+        source VARCHAR(255),
+        date DATE NOT NULL,
+        amount DECIMAL(15,2) NOT NULL,
+        currency VARCHAR(10) DEFAULT 'MDL',
+        department VARCHAR(255),
+        supplier VARCHAR(255),
+        category VARCHAR(255),
+        description TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
     const result = await pool.query('SELECT * FROM expenses ORDER BY date DESC');
     res.json(result.rows);
   } catch (error) {
@@ -614,6 +631,49 @@ app.get('/api/test/payments-table', async (req, res) => {
     });
   } catch (error) {
     console.error('Error checking payments table:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test endpoint for checking aliases table structure
+app.get('/api/test/aliases-table', async (req, res) => {
+  try {
+    // Проверяем существование таблицы aliases
+    const tableExistsQuery = `
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'aliases'
+      );
+    `;
+    const tableExists = await pool.query(tableExistsQuery);
+    
+    if (!tableExists.rows[0].exists) {
+      return res.json({
+        exists: false,
+        message: 'Table aliases does not exist'
+      });
+    }
+    
+    // Проверяем структуру таблицы aliases
+    const tableInfoQuery = `
+      SELECT column_name, data_type, is_nullable
+      FROM information_schema.columns 
+      WHERE table_name = 'aliases'
+      ORDER BY ordinal_position
+    `;
+    const tableInfo = await pool.query(tableInfoQuery);
+    
+    // Проверяем количество записей в таблице
+    const countQuery = `SELECT COUNT(*) as count FROM aliases`;
+    const countResult = await pool.query(countQuery);
+    
+    res.json({
+      exists: true,
+      tableStructure: tableInfo.rows,
+      recordCount: parseInt(countResult.rows[0].count)
+    });
+  } catch (error) {
+    console.error('Error checking aliases table:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -912,10 +972,23 @@ app.delete('/api/expense-sources/:id', async (req, res) => {
 // Get all aliases
 app.get('/api/aliases', async (req, res) => {
   try {
+    // Создаем таблицу aliases если она не существует
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS aliases (
+        id SERIAL PRIMARY KEY,
+        source_value VARCHAR(255) NOT NULL,
+        normalized_value VARCHAR(255) NOT NULL,
+        type VARCHAR(50) DEFAULT 'supplier',
+        is_group BOOLEAN DEFAULT false,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    
     const result = await pool.query('SELECT * FROM aliases ORDER BY created_at DESC');
     const rows = (result.rows || []).map((r) => ({
       ...r,
-      is_group: typeof r.is_group === 'boolean' ? r.is_group : r.alias === r.canonical_name,
+      is_group: typeof r.is_group === 'boolean' ? r.is_group : r.source_value === r.normalized_value,
     }));
     res.json(rows);
   } catch (error) {
@@ -927,24 +1000,18 @@ app.get('/api/aliases', async (req, res) => {
 // Create new alias
 app.post('/api/aliases', async (req, res) => {
   try {
-    const { alias, canonical_name, type, is_group } = req.body;
+    const { source_value, normalized_value, type, is_group } = req.body;
     
-    if (!alias || !canonical_name || !type) {
+    if (!source_value || !normalized_value || !type) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-
-    const canonicalEffective = is_group ? alias : canonical_name;
     
     const result = await pool.query(
-      'INSERT INTO aliases (alias, canonical_name, type) VALUES ($1, $2, $3) RETURNING *',
-      [alias, canonicalEffective, type]
+      'INSERT INTO aliases (source_value, normalized_value, type, is_group) VALUES ($1, $2, $3, $4) RETURNING *',
+      [source_value, normalized_value, type, is_group || false]
     );
     
-    const row = result.rows[0];
-    res.status(201).json({
-      ...row,
-      is_group: typeof row.is_group === 'boolean' ? row.is_group : row.alias === row.canonical_name,
-    });
+    res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating alias:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -955,28 +1022,22 @@ app.post('/api/aliases', async (req, res) => {
 app.put('/api/aliases/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { alias, canonical_name, type, is_group } = req.body;
+    const { source_value, normalized_value, type, is_group } = req.body;
     
-    if (!alias || !canonical_name || !type) {
+    if (!source_value || !normalized_value || !type) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
-
-    const canonicalEffective = is_group ? alias : canonical_name;
     
     const result = await pool.query(
-      'UPDATE aliases SET alias = $1, canonical_name = $2, type = $3 WHERE id = $4 RETURNING *',
-      [alias, canonicalEffective, type, id]
+      'UPDATE aliases SET source_value = $1, normalized_value = $2, type = $3, is_group = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *',
+      [source_value, normalized_value, type, is_group || false, id]
     );
     
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Alias not found' });
     }
     
-    const row = result.rows[0];
-    res.json({
-      ...row,
-      is_group: typeof row.is_group === 'boolean' ? row.is_group : row.alias === row.canonical_name,
-    });
+    res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating alias:', error);
     res.status(500).json({ error: 'Internal server error' });

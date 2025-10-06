@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,44 +11,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus, Search, ShoppingCart, TrendingUp, DollarSign, Calendar } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/utils/formatters';
 
-const mockSales = [
-  {
-    id: '1',
-    date: new Date('2024-01-15'),
-    customerName: 'ООО "Молдавский Торговый Дом"',
-    product: 'Комплект оборудования XT-500',
-    quantity: 2,
-    unitPrice: 15000,
-    totalAmount: 30000,
-    paymentMethod: 'Банковский перевод',
-    status: 'Оплачен',
-    invoiceNumber: 'INV-2024-001'
-  },
-  {
-    id: '2',
-    date: new Date('2024-01-14'),
-    customerName: 'ИП Попович С.М.',
-    product: 'Сервисное обслуживание',
-    quantity: 1,
-    unitPrice: 2500,
-    totalAmount: 2500,
-    paymentMethod: 'Наличные',
-    status: 'В ожидании',
-    invoiceNumber: 'INV-2024-002'
-  },
-  {
-    id: '3',
-    date: new Date('2024-01-13'),
-    customerName: 'АО "Молдтелеком"',
-    product: 'Лицензия ПО Enterprise',
-    quantity: 5,
-    unitPrice: 8000,
-    totalAmount: 40000,
-    paymentMethod: 'Банковский перевод',
-    status: 'Оплачен',
-    invoiceNumber: 'INV-2024-003'
-  }
-];
+// Удалены моки - данные будут загружаться из API
+
+interface Sale {
+  id: string;
+  date: Date;
+  customerName: string;
+  product: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  paymentMethod: string;
+  status: string;
+  invoiceNumber: string;
+}
 
 const statusConfig = {
   'Оплачен': { label: 'Оплачен', variant: 'default' as const },
@@ -59,16 +35,23 @@ const statusConfig = {
 export default function Sales() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [loading, setLoading] = useState(true);
   
-  const filteredSales = mockSales.filter(sale => 
+  useEffect(() => {
+    // TODO: Загрузка данных из API
+    setLoading(false);
+  }, []);
+  
+  const filteredSales = sales.filter(sale => 
     sale.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     sale.product.toLowerCase().includes(searchTerm.toLowerCase()) ||
     sale.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const totalSales = mockSales.reduce((sum, sale) => sum + sale.totalAmount, 0);
-  const paidSales = mockSales.filter(sale => sale.status === 'Оплачен').reduce((sum, sale) => sum + sale.totalAmount, 0);
-  const pendingSales = mockSales.filter(sale => sale.status === 'В ожидании').reduce((sum, sale) => sum + sale.totalAmount, 0);
+  const totalSales = sales.reduce((sum, sale) => sum + sale.totalAmount, 0);
+  const paidSales = sales.filter(sale => sale.status === 'Оплачен').reduce((sum, sale) => sum + sale.totalAmount, 0);
+  const pendingSales = sales.filter(sale => sale.status === 'В ожидании').reduce((sum, sale) => sum + sale.totalAmount, 0);
 
   return (
     <div className="space-y-6">

@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
 import {
   CreditCard,
-  DollarSign,
   AlertTriangle,
   Calendar
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { DashboardStats, Payment, Credit } from '@/types/credit';
 import { formatCurrency } from '@/utils/formatters';
 
@@ -415,16 +414,20 @@ export default function Dashboard() {
                   <div className="flex justify-between text-xs mb-1">
                     <span className="text-gray-500">Прогресс выплаты</span>
                     <span className="text-green-600 font-xs">
-                      {((stats.remainingPrincipal / (creditTypeTotals?.total || stats.totalPrincipal)) * 100).toFixed(1)}% от общей суммы
+                      {stats.totalPrincipal > 0 ? (stats.totalPaid / stats.totalPrincipal * 100).toFixed(1) : '0.0'}% выплачено
                     </span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-1">
+                  <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden shadow-inner">
                     <div
-                      className="bg-green-500 h-1 rounded-full transition-all duration-1000 ease-in-out"
+                      className="bg-gradient-to-r from-green-500 to-green-600 h-full rounded-full transition-all duration-1000 ease-in-out shadow-sm"
                       style={{
-                        width: `${((stats.remainingPrincipal / (creditTypeTotals?.total || stats.totalPrincipal)) * 100)}%`
+                        width: `${stats.totalPrincipal > 0 ? Math.min(Math.max((stats.totalPaid / stats.totalPrincipal * 100), 0), 100) : 0}%`
                       }}
                     ></div>
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>Выплачено: {formatCurrency(stats.totalPaid).replace('MDL', 'L')}</span>
+                    <span>Всего: {formatCurrency(stats.totalPrincipal).replace('MDL', 'L')}</span>
                   </div>
                 </div>
               </div>

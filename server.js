@@ -2902,6 +2902,7 @@ app.get('/api/reports/forecast', async (req, res) => {
     const forecastItems = [];
     
     for (const credit of result.rows) {
+      console.log('[FORECAST DEBUG] Processing credit:', credit.contract_number);
       try {
         // Получаем ставки для кредита
         const ratesQuery = `
@@ -2911,10 +2912,18 @@ app.get('/api/reports/forecast', async (req, res) => {
           ORDER BY effective_date ASC
         `;
         const ratesResult = await pool.query(ratesQuery, [credit.id]);
-        const rates = ratesResult.rows.map(row => ({
+        let rates = ratesResult.rows.map(row => ({
           annualPercent: parseFloat(row.rate) * 100,
           effectiveDate: new Date(row.effective_date)
         }));
+        
+        // Если нет ставок, используем базовую ставку 12%
+        if (rates.length === 0) {
+          rates = [{
+            annualPercent: 12.0,
+            effectiveDate: new Date(credit.start_date)
+          }];
+        }
         
         // Получаем корректировки (если есть)
         const adjustmentsQuery = `

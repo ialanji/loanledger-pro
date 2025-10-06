@@ -552,6 +552,41 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Test endpoint for debugging forecast data
+app.get('/api/test/forecast-data', async (req, res) => {
+  try {
+    // Простой запрос для проверки данных
+    const creditsResult = await pool.query(`
+      SELECT 
+        c.id,
+        c.contract_number,
+        c.principal,
+        c.start_date,
+        b.name as bank_name
+      FROM credits c
+      LEFT JOIN banks b ON c.bank_id = b.id
+      WHERE CAST(c.principal AS DECIMAL) > 0
+      LIMIT 5
+    `);
+    
+    const ratesResult = await pool.query(`
+      SELECT credit_id, rate, effective_date
+      FROM credit_rates
+      LIMIT 5
+    `);
+    
+    res.json({
+      credits: creditsResult.rows,
+      rates: ratesResult.rows,
+      creditsCount: creditsResult.rows.length,
+      ratesCount: ratesResult.rows.length
+    });
+  } catch (error) {
+    console.error('Test endpoint error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get import logs
 app.get('/api/import-logs', async (req, res) => {
   try {

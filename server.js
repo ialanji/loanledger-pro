@@ -2829,7 +2829,26 @@ app.get('/api/reports/forecast', async (req, res) => {
   console.log('[FORECAST DEBUG] Endpoint hit with query:', req.query);
   console.log('[FORECAST DEBUG] Request timestamp:', new Date().toISOString());
   try {
-    const { bankId } = req.query;
+    const { dateFrom, dateTo, bankId } = req.query;
+    
+    // Валидация параметров фильтрации для прогнозного отчета
+    if (dateFrom && !/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
+      return res.status(400).json({ 
+        error: 'Invalid dateFrom format. Expected ISO 8601 date format (YYYY-MM-DD)' 
+      });
+    }
+    
+    if (dateTo && !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+      return res.status(400).json({ 
+        error: 'Invalid dateTo format. Expected ISO 8601 date format (YYYY-MM-DD)' 
+      });
+    }
+    
+    if (bankId && bankId !== 'all' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bankId)) {
+      return res.status(400).json({ 
+        error: 'Invalid bankId format. Expected UUID format or "all"' 
+      });
+    }
     
     // Получаем активные кредиты
     let query = `
@@ -2850,6 +2869,19 @@ app.get('/api/reports/forecast', async (req, res) => {
     
     const params = [];
     let paramIndex = 1;
+    
+    // Добавляем условия фильтрации по датам и банку
+    if (dateFrom) {
+      query += ` AND c.start_date >= $${paramIndex}`;
+      params.push(dateFrom);
+      paramIndex++;
+    }
+    
+    if (dateTo) {
+      query += ` AND c.start_date <= $${paramIndex}`;
+      params.push(dateTo);
+      paramIndex++;
+    }
     
     if (bankId && bankId !== 'all') {
       query += ` AND c.bank_id = $${paramIndex}`;
@@ -2987,28 +3019,43 @@ app.get('/api/reports/portfolio', async (req, res) => {
   try {
     const { dateFrom, dateTo, bankId } = req.query;
     
+    // Validate filter parameters
+    if (dateFrom && !/^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
+      return res.status(400).json({ 
+        error: 'Invalid dateFrom format. Expected ISO 8601 date format (YYYY-MM-DD)' 
+      });
+    }
+    
+    if (dateTo && !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+      return res.status(400).json({ 
+        error: 'Invalid dateTo format. Expected ISO 8601 date format (YYYY-MM-DD)' 
+      });
+    }
+    
+    if (bankId && bankId !== 'all' && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bankId)) {
+      return res.status(400).json({ 
+        error: 'Invalid bankId format. Expected UUID format or "all"' 
+      });
+    }
+
+    // Get individual credit details with bank names and payment aggregation
     let query = `
       SELECT 
+        c.id,
+        c.contract_number,
+        c.principal,
+        c.start_date,
+        b.id as bank_id,
         b.name as bank_name,
-        COUNT(c.id) as credit_count,
-        SUM(c.principal) as total_principal,
-        AVG(COALESCE(cr.rate, c.initial_rate)) as avg_rate,
-        SUM(COALESCE(p.total_paid, 0)) as total_paid
+        COALESCE(p.total_paid, 0) as paid_amount
       FROM credits c
       LEFT JOIN banks b ON c.bank_id = b.id
-      LEFT JOIN credit_rates cr ON c.id = cr.credit_id 
-        AND cr.effective_date = (
-          SELECT MAX(effective_date) 
-          FROM credit_rates 
-          WHERE credit_id = c.id 
-          AND effective_date <= CURRENT_DATE
-        )
       LEFT JOIN (
         SELECT credit_id, SUM(amount) as total_paid
         FROM payments
         GROUP BY credit_id
       ) p ON c.id = p.credit_id
-      WHERE 1=1
+      WHERE c.principal > 0
     `;
     
     const params = [];
@@ -3032,22 +3079,94 @@ app.get('/api/reports/portfolio', async (req, res) => {
       paramIndex++;
     }
     
-    query += ` GROUP BY b.id, b.name ORDER BY total_principal DESC`;
+    query += ` ORDER BY b.name, c.contract_number`;
     
     const result = await pool.query(query, params);
     
-    const portfolioData = result.rows.map(row => ({
-      bank: row.bank_name,
-      creditCount: parseInt(row.credit_count),
-      totalPrincipal: parseFloat(row.total_principal || 0),
-      avgRate: parseFloat(row.avg_rate || 0),
-      totalPaid: parseFloat(row.total_paid || 0),
-      remainingBalance: parseFloat(row.total_principal || 0) - parseFloat(row.total_paid || 0)
-    }));
+    // Group credits by bank and calculate aggregates
+    const bankGroups = {};
+    
+    for (const credit of result.rows) {
+      const bankName = credit.bank_name || 'Unknown Bank';
+      
+      if (!bankGroups[bankName]) {
+        bankGroups[bankName] = {
+          bank: bankName,
+          creditCount: 0,
+          totalPrincipal: 0,
+          totalPaid: 0,
+          remainingBalance: 0,
+          credits: []
+        };
+      }
+      
+      const paidAmount = parseFloat(credit.paid_amount || 0);
+      const principal = parseFloat(credit.principal || 0);
+      const remainingBalance = principal - paidAmount;
+      
+      // Get current rate for this credit
+      let currentRate = 0;
+      try {
+        const rateDate = dateTo || new Date().toISOString().slice(0, 10);
+        const rateQuery = `
+          SELECT rate 
+          FROM credit_rates 
+          WHERE credit_id = $1 
+            AND effective_date <= $2 
+          ORDER BY effective_date DESC 
+          LIMIT 1
+        `;
+        const rateResult = await pool.query(rateQuery, [credit.id, rateDate]);
+        if (rateResult.rows.length > 0) {
+          currentRate = parseFloat(rateResult.rows[0].rate) * 100; // Convert to percentage
+        }
+      } catch (error) {
+        console.error(`Error fetching rate for credit ${credit.id}:`, error);
+        // currentRate remains 0 as default
+      }
+      
+      // Add credit details to the bank group
+      bankGroups[bankName].credits.push({
+        id: credit.id,
+        contractNumber: credit.contract_number,
+        principal: principal,
+        startDate: credit.start_date,
+        paidAmount: paidAmount,
+        remainingBalance: remainingBalance,
+        rate: currentRate
+      });
+      
+      // Update bank aggregates
+      bankGroups[bankName].creditCount++;
+      bankGroups[bankName].totalPrincipal += principal;
+      bankGroups[bankName].totalPaid += paidAmount;
+      bankGroups[bankName].remainingBalance += remainingBalance;
+    }
+    
+    // Convert to array and calculate overall totals
+    const portfolioData = Object.values(bankGroups);
     
     const totalPrincipal = portfolioData.reduce((sum, item) => sum + item.totalPrincipal, 0);
     const totalCredits = portfolioData.reduce((sum, item) => sum + item.creditCount, 0);
     const totalPaid = portfolioData.reduce((sum, item) => sum + item.totalPaid, 0);
+    
+    // Calculate weighted average rate for each bank
+    portfolioData.forEach(bank => {
+      let weightedRateSum = 0;
+      let totalWeight = 0;
+      
+      bank.credits.forEach(credit => {
+        const weight = credit.remainingBalance;
+        if (weight > 0) {
+          weightedRateSum += weight * credit.rate;
+          totalWeight += weight;
+        }
+      });
+      
+      // Calculate average: avgRate = weightedRateSum / totalWeight
+      // Handle division by zero (return 0% if totalWeight is 0)
+      bank.avgRate = totalWeight > 0 ? weightedRateSum / totalWeight : 0;
+    });
     
     res.json({
       totalPrincipal,

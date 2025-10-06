@@ -56,16 +56,78 @@ interface Bank {
   name: string;
 }
 
+// Utility function to transform forecast data into pivot table format
+const transformToPivotTable = (items: any[]) => {
+  const pivotData: Record<string, {
+    year: number;
+    month: string;
+    banks: Record<string, { principal: number; interest: number }>;
+    totals: { principal: number; interest: number };
+  }> = {};
+
+  // Group data by year/month
+  items.forEach(item => {
+    const key = item.month; // Format: "2024-01"
+    const [year, monthNum] = key.split('-');
+    const monthName = new Date(parseInt(year), parseInt(monthNum) - 1).toLocaleDateString('ru-RU', { 
+      year: 'numeric', 
+      month: 'long' 
+    });
+
+    if (!pivotData[key]) {
+      pivotData[key] = {
+        year: parseInt(year),
+        month: monthName,
+        banks: {},
+        totals: { principal: 0, interest: 0 }
+      };
+    }
+
+    // Initialize bank data if not exists
+    if (!pivotData[key].banks[item.bank]) {
+      pivotData[key].banks[item.bank] = { principal: 0, interest: 0 };
+    }
+
+    // Aggregate amounts by bank
+    pivotData[key].banks[item.bank].principal += item.principalAmount || 0;
+    pivotData[key].banks[item.bank].interest += item.interestAmount || 0;
+
+    // Update totals
+    pivotData[key].totals.principal += item.principalAmount || 0;
+    pivotData[key].totals.interest += item.interestAmount || 0;
+  });
+
+  // Convert to array and sort by year/month
+  return Object.entries(pivotData)
+    .map(([key, data]) => ({ key, ...data }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+};
+
+// Extract unique bank names from forecast data
+const getUniqueBankNames = (items: any[]) => {
+  const bankNames = [...new Set(items.map(item => item.bank))];
+  return bankNames.sort(); // Sort alphabetically for consistent display
+};
+
 export default function Reports() {
   const [selectedReport, setSelectedReport] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [selectedBank, setSelectedBank] = useState('all');
   const [exportFormat, setExportFormat] = useState('pdf');
+  const [reportForm, setReportForm] = useState<'list' | 'table'>('list');
+  const [expandedBanks, setExpandedBanks] = useState<Record<string, boolean>>({});
   const [banks, setBanks] = useState<Bank[]>([]);
   const [reportData, setReportData] = useState<OverdueReportData | ForecastReportData | PortfolioReportData | InterestReportData | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const toggleBankCredits = (bankName: string) => {
+    setExpandedBanks(prev => ({
+      ...prev,
+      [bankName]: !prev[bankName]
+    }));
+  };
 
   useEffect(() => {
     const loadBanks = async () => {
@@ -221,44 +283,140 @@ export default function Reports() {
         const totalInterest = forecastData.items.reduce((sum, item) => sum + (item.interestAmount || 0), 0);
         const totalAmount = forecastData.items.reduce((sum, item) => sum + (item.totalAmount || 0), 0);
         
-        return (
-          <div className="space-y-4">
-            <div className="overflow-x-auto">
-              <table className="finance-table">
-                <thead>
-                  <tr>
-                    <th>Банк</th>
-                    <th>Кредит</th>
-                    <th>Месяц</th>
-                    <th>Остаток долга</th>
-                    <th>Проценты</th>
-                    <th>Всего</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {forecastData.items.map((item, index) => (
-                    <tr key={index}>
-                      <td className="font-medium">{item.bank}</td>
-                      <td>{item.creditNumber}</td>
-                      <td>{item.month}</td>
-                      <td className="financial-amount">{formatCurrency(item.principalAmount)}</td>
-                      <td className="financial-amount">{formatCurrency(item.interestAmount)}</td>
-                      <td className="financial-amount positive">{formatCurrency(item.totalAmount)}</td>
+        if (reportForm === 'list') {
+          // List view - existing table structure
+          return (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <table className="finance-table">
+                  <thead>
+                    <tr>
+                      <th>Банк</th>
+                      <th>Кредит</th>
+                      <th>Месяц</th>
+                      <th>Остаток долга</th>
+                      <th>Проценты</th>
+                      <th>Всего</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="font-bold bg-gray-50">
-                    <td colSpan={3} className="font-bold">Итого:</td>
-                    <td className="financial-amount font-bold">{formatCurrency(totalPrincipal)}</td>
-                    <td className="financial-amount font-bold">{formatCurrency(totalInterest)}</td>
-                    <td className="financial-amount positive font-bold">{formatCurrency(totalAmount)}</td>
-                  </tr>
-                </tfoot>
-              </table>
+                  </thead>
+                  <tbody>
+                    {forecastData.items.map((item, index) => (
+                      <tr key={index}>
+                        <td className="font-medium">{item.bank}</td>
+                        <td>{item.creditNumber}</td>
+                        <td>{item.month}</td>
+                        <td className="financial-amount">{formatCurrency(item.principalAmount)}</td>
+                        <td className="financial-amount">{formatCurrency(item.interestAmount)}</td>
+                        <td className="financial-amount positive">{formatCurrency(item.totalAmount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="font-bold bg-gray-50">
+                      <td colSpan={3} className="font-bold">Итого:</td>
+                      <td className="financial-amount font-bold">{formatCurrency(totalPrincipal)}</td>
+                      <td className="financial-amount font-bold">{formatCurrency(totalInterest)}</td>
+                      <td className="financial-amount positive font-bold">{formatCurrency(totalAmount)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </div>
-          </div>
-        );
+          );
+        } else {
+          // Table view - pivot table format
+          const pivotData = transformToPivotTable(forecastData.items);
+          const uniqueBanks = getUniqueBankNames(forecastData.items);
+          
+          // Calculate grand totals
+          const grandTotals = {
+            principal: pivotData.reduce((sum, row) => sum + row.totals.principal, 0),
+            interest: pivotData.reduce((sum, row) => sum + row.totals.interest, 0),
+            banks: uniqueBanks.reduce((acc, bank) => {
+              acc[bank] = {
+                principal: pivotData.reduce((sum, row) => sum + (row.banks[bank]?.principal || 0), 0),
+                interest: pivotData.reduce((sum, row) => sum + (row.banks[bank]?.interest || 0), 0)
+              };
+              return acc;
+            }, {} as Record<string, { principal: number; interest: number }>)
+          };
+
+          return (
+            <div className="space-y-4">
+              <div className="overflow-x-auto">
+                <table className="finance-table">
+                  <thead>
+                    {/* First header row - bank names */}
+                    <tr>
+                      <th rowSpan={2}>Год</th>
+                      <th rowSpan={2}>Месяц</th>
+                      {uniqueBanks.map(bank => (
+                        <th key={bank} colSpan={2} className="text-center">{bank}</th>
+                      ))}
+                      <th colSpan={2} className="text-center">Итого</th>
+                    </tr>
+                    {/* Second header row - principal/interest columns */}
+                    <tr>
+                      {uniqueBanks.map(bank => (
+                        <React.Fragment key={bank}>
+                          <th>Остаток долга</th>
+                          <th>Проценты</th>
+                        </React.Fragment>
+                      ))}
+                      <th>Остаток долга</th>
+                      <th>Проценты</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pivotData.map((row, index) => (
+                      <tr key={index}>
+                        <td>{row.year}</td>
+                        <td>{row.month}</td>
+                        {uniqueBanks.map(bank => (
+                          <React.Fragment key={bank}>
+                            <td className="financial-amount">
+                              {formatCurrency(row.banks[bank]?.principal || 0)}
+                            </td>
+                            <td className="financial-amount">
+                              {formatCurrency(row.banks[bank]?.interest || 0)}
+                            </td>
+                          </React.Fragment>
+                        ))}
+                        <td className="financial-amount font-bold">
+                          {formatCurrency(row.totals.principal)}
+                        </td>
+                        <td className="financial-amount font-bold">
+                          {formatCurrency(row.totals.interest)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="font-bold bg-gray-50">
+                      <td colSpan={2} className="font-bold">Итого:</td>
+                      {uniqueBanks.map(bank => (
+                        <React.Fragment key={bank}>
+                          <td className="financial-amount font-bold">
+                            {formatCurrency(grandTotals.banks[bank]?.principal || 0)}
+                          </td>
+                          <td className="financial-amount font-bold">
+                            {formatCurrency(grandTotals.banks[bank]?.interest || 0)}
+                          </td>
+                        </React.Fragment>
+                      ))}
+                      <td className="financial-amount positive font-bold">
+                        {formatCurrency(grandTotals.principal)}
+                      </td>
+                      <td className="financial-amount positive font-bold">
+                        {formatCurrency(grandTotals.interest)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          );
+        }
 
       case 'portfolio':
           const portfolioData = reportData as PortfolioReportData;
@@ -447,19 +605,20 @@ export default function Reports() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label>Формат экспорта</Label>
-              <Select value={exportFormat} onValueChange={setExportFormat}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pdf">PDF</SelectItem>
-                  <SelectItem value="excel">Excel</SelectItem>
-                  <SelectItem value="csv">CSV</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {selectedReport === 'forecast' && (
+              <div>
+                <Label>Форма отчета</Label>
+                <Select value={reportForm} onValueChange={(value: 'list' | 'table') => setReportForm(value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="list">Список</SelectItem>
+                    <SelectItem value="table">Таблица</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <div className="flex gap-2 mt-6">
             <Button 

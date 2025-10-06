@@ -15,7 +15,10 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:client": "jest --selectProjects client",
-    "test:server": "jest --selectProjects server"
+    "test:server": "jest --selectProjects server",
+    "test:e2e": "playwright test",
+    "test:reports": "node scripts/test-reports-fixes.js",
+    "verify:reports": "node scripts/verify-reports-fixes.js"
   },
   "dependencies": {
     "@googleapis/sheets": "^12.0.0",
@@ -89,6 +92,7 @@
     "@babel/preset-react": "^7.27.1",
     "@babel/preset-typescript": "^7.27.1",
     "@eslint/js": "^9.32.0",
+    "@playwright/test": "^1.56.0",
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.8.0",

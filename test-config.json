@@ -1,0 +1,112 @@
+{
+  "regression": {
+    "serverPort": 3001,
+    "testTimeout": 300000,
+    "reportDir": "test-reports",
+    "includePerformance": true,
+    "verbose": false,
+    "retries": 2,
+    "parallel": false
+  },
+  "notifications": {
+    "webhookUrl": null,
+    "emailEnabled": false,
+    "slackEnabled": false
+  },
+  "thresholds": {
+    "responseTime": {
+      "excellent": 50,
+      "good": 200,
+      "acceptable": 1000,
+      "slow": 5000
+    },
+    "successRate": {
+      "minimum": 95,
+      "target": 100
+    },
+    "performance": {
+      "maxAverageResponseTime": 1000,
+      "maxP95ResponseTime": 2000,
+      "maxErrorRate": 0.05
+    }
+  },
+  "testSuites": {
+    "verification": {
+      "enabled": true,
+      "script": "tests/verify-fixes.js",
+      "timeout": 60000,
+      "critical": true
+    },
+    "playwright": {
+      "enabled": true,
+      "config": "playwright.api.config.js",
+      "timeout": 300000,
+      "critical": true,
+      "tests": [
+        "aliases-crud.test.js",
+        "expenses-crud.test.js",
+        "error-scenarios.test.js",
+        "infrastructure.test.js"
+      ]
+    },
+    "performance": {
+      "enabled": true,
+      "config": "playwright.api.config.js",
+      "timeout": 600000,
+      "critical": false,
+      "tests": [
+        "performance-load.test.js"
+      ]
+    },
+    "logging": {
+      "enabled": true,
+      "config": "playwright.api.config.js",
+      "timeout": 180000,
+      "critical": false,
+      "tests": [
+        "logging-system.test.js"
+      ]
+    }
+  },
+  "environments": {
+    "development": {
+      "serverPort": 3001,
+      "databaseUrl": "postgresql://localhost:5432/finance_dev",
+      "logLevel": "DEBUG"
+    },
+    "test": {
+      "serverPort": 3001,
+      "databaseUrl": "postgresql://localhost:5432/finance_test",
+      "logLevel": "ERROR"
+    },
+    "staging": {
+      "serverPort": 3001,
+      "databaseUrl": "postgresql://localhost:5432/finance_staging",
+      "logLevel": "INFO"
+    }
+  },
+  "reporting": {
+    "formats": ["json", "html", "markdown"],
+    "includeDetails": true,
+    "includeRecommendations": true,
+    "archiveReports": true,
+    "maxArchiveAge": 30
+  },
+  "monitoring": {
+    "healthCheckInterval": 60000,
+    "performanceBaseline": {
+      "responseTime": 500,
+      "throughput": 100,
+      "errorRate": 0.01
+    },
+    "alerts": {
+      "enabled": true,
+      "channels": ["webhook", "console"],
+      "thresholds": {
+        "responseTime": 2000,
+        "errorRate": 0.1,
+        "successRate": 0.9
+      }
+    }
+  }
+}

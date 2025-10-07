@@ -245,7 +245,7 @@ export default function ExpenseSourcesConfig({ onImportComplete }: { onImportCom
       ...prev,
       column_mapping: {
         ...prev.column_mapping,
-        [field]: column
+        [field]: column === 'none' ? '' : column
       }
     }))
   }
@@ -636,7 +636,7 @@ export default function ExpenseSourcesConfig({ onImportComplete }: { onImportCom
                     <div key={field} className="grid grid-cols-2 gap-4 items-center">
                       <Label className="capitalize">{field}</Label>
                       <Select
-                        value={(column as string) || ''}
+                        value={(column as string) || 'none'}
                         onValueChange={(val) => handleColumnMappingChange(field, val)}
                         disabled={importing}
                       >
@@ -644,7 +644,7 @@ export default function ExpenseSourcesConfig({ onImportComplete }: { onImportCom
                           <SelectValue placeholder="Выберите колонку" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">—</SelectItem>
+                          <SelectItem value="none">—</SelectItem>
                           {COLUMN_OPTIONS.map((col) => (
                             <SelectItem key={col} value={col}>{col}</SelectItem>
                           ))}

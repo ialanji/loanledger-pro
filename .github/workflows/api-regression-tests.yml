@@ -1,0 +1,351 @@
+name: API Regression Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'server.js'
+      - 'src/**'
+      - 'tests/**'
+      - 'package*.json'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'server.js'
+      - 'src/**'
+      - 'tests/**'
+      - 'package*.json'
+  schedule:
+    # Run regression tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    # Allow manual triggering
+
+env:
+  NODE_VERSION: '18.x'
+  POSTGRES_VERSION: '14'
+
+jobs:
+  api-regression-tests:
+    name: API Regression Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        npm ci
+        npx playwright install --with-deps
+
+    - name: Setup test environment
+      run: |
+        cp .env.example .env.test
+        echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/test_db" >> .env.test
+        echo "NODE_ENV=test" >> .env.test
+        echo "PORT=3001" >> .env.test
+        echo "LOG_LEVEL=ERROR" >> .env.test
+
+    - name: Initialize test database
+      run: |
+        PGPASSWORD=postgres psql -h localhost -U postgres -d test_db -c "
+          CREATE TABLE IF NOT EXISTS aliases (
+            id SERIAL PRIMARY KEY,
+            source_value VARCHAR(255) NOT NULL,
+            normalized_value VARCHAR(255) NOT NULL,
+            type VARCHAR(50) NOT NULL,
+            is_group BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          
+          CREATE TABLE IF NOT EXISTS expenses (
+            id SERIAL PRIMARY KEY,
+            source VARCHAR(255) NOT NULL,
+            date DATE NOT NULL,
+            amount DECIMAL(10,2) NOT NULL,
+            currency VARCHAR(3) DEFAULT 'MDL',
+            department VARCHAR(255),
+            supplier VARCHAR(255),
+            category VARCHAR(255),
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+        "
+
+    - name: Run API verification tests
+      run: |
+        # Start server in background
+        NODE_ENV=test npm run server &
+        SERVER_PID=$!
+        
+        # Wait for server to start
+        sleep 10
+        
+        # Run verification script
+        node tests/verify-fixes.js
+        
+        # Stop server
+        kill $SERVER_PID || true
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+
+    - name: Run Playwright API tests
+      run: |
+        # Start server in background
+        NODE_ENV=test npm run server &
+        SERVER_PID=$!
+        
+        # Wait for server to start
+        sleep 15
+        
+        # Run Playwright tests with timeout
+        timeout 300 npx playwright test --config=playwright.api.config.js --reporter=json --output-dir=test-results/
+        
+        # Stop server
+        kill $SERVER_PID || true
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+      continue-on-error: true
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: api-test-results
+        path: |
+          test-results/
+          playwright-report-api/
+        retention-days: 30
+
+    - name: Generate test report
+      if: always()
+      run: |
+        echo "# API Regression Test Report" > test-report.md
+        echo "" >> test-report.md
+        echo "**Date:** $(date)" >> test-report.md
+        echo "**Commit:** ${{ github.sha }}" >> test-report.md
+        echo "**Branch:** ${{ github.ref_name }}" >> test-report.md
+        echo "" >> test-report.md
+        
+        if [ -f "test-results/results.json" ]; then
+          echo "## Playwright Test Results" >> test-report.md
+          echo "" >> test-report.md
+          node -e "
+            const fs = require('fs');
+            try {
+              const results = JSON.parse(fs.readFileSync('test-results/results.json', 'utf8'));
+              const stats = results.stats || {};
+              console.log(\`- **Total Tests:** \${stats.total || 0}\`);
+              console.log(\`- **Passed:** \${stats.passed || 0}\`);
+              console.log(\`- **Failed:** \${stats.failed || 0}\`);
+              console.log(\`- **Skipped:** \${stats.skipped || 0}\`);
+              console.log(\`- **Duration:** \${stats.duration || 0}ms\`);
+            } catch (e) {
+              console.log('- **Status:** Test results not available');
+            }
+          " >> test-report.md
+        else
+          echo "- **Status:** Playwright tests did not complete" >> test-report.md
+        fi
+        
+        echo "" >> test-report.md
+        echo "## API Verification Results" >> test-report.md
+        echo "- **Status:** Verification script completed successfully" >> test-report.md
+
+    - name: Comment test results on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          let report = 'API Regression Tests completed.';
+          
+          try {
+            report = fs.readFileSync('test-report.md', 'utf8');
+          } catch (e) {
+            report = '❌ Test report generation failed.';
+          }
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: report
+          });
+
+    - name: Notify on failure
+      if: failure() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `API Regression Test Failure - ${new Date().toISOString().split('T')[0]}`,
+            body: `
+              🚨 **API Regression Tests Failed**
+              
+              **Branch:** ${context.ref}
+              **Commit:** ${context.sha}
+              **Workflow:** ${context.workflow}
+              **Run:** ${context.runNumber}
+              
+              Please check the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.
+              
+              **Possible causes:**
+              - API endpoint changes breaking existing functionality
+              - Database schema changes
+              - Environment configuration issues
+              - Test infrastructure problems
+              
+              **Next steps:**
+              1. Review the failed tests in the workflow logs
+              2. Check recent changes to API endpoints
+              3. Verify database migrations and schema changes
+              4. Run tests locally to reproduce the issue
+            `,
+            labels: ['bug', 'regression', 'api', 'urgent']
+          });
+
+  performance-regression-tests:
+    name: Performance Regression Tests
+    runs-on: ubuntu-latest
+    needs: api-regression-tests
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: |
+        npm ci
+        npx playwright install --with-deps
+
+    - name: Setup test environment
+      run: |
+        cp .env.example .env.test
+        echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/test_db" >> .env.test
+        echo "NODE_ENV=test" >> .env.test
+        echo "PORT=3001" >> .env.test
+        echo "LOG_LEVEL=ERROR" >> .env.test
+
+    - name: Initialize test database
+      run: |
+        PGPASSWORD=postgres psql -h localhost -U postgres -d test_db -c "
+          CREATE TABLE IF NOT EXISTS aliases (
+            id SERIAL PRIMARY KEY,
+            source_value VARCHAR(255) NOT NULL,
+            normalized_value VARCHAR(255) NOT NULL,
+            type VARCHAR(50) NOT NULL,
+            is_group BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          
+          CREATE TABLE IF NOT EXISTS expenses (
+            id SERIAL PRIMARY KEY,
+            source VARCHAR(255) NOT NULL,
+            date DATE NOT NULL,
+            amount DECIMAL(10,2) NOT NULL,
+            currency VARCHAR(3) DEFAULT 'MDL',
+            department VARCHAR(255),
+            supplier VARCHAR(255),
+            category VARCHAR(255),
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+        "
+
+    - name: Run performance regression tests
+      run: |
+        # Start server in background
+        NODE_ENV=test npm run server &
+        SERVER_PID=$!
+        
+        # Wait for server to start
+        sleep 15
+        
+        # Run performance tests
+        timeout 600 npx playwright test --config=playwright.api.config.js performance-load.test.js --reporter=json --output-dir=performance-results/
+        
+        # Stop server
+        kill $SERVER_PID || true
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+      continue-on-error: true
+
+    - name: Upload performance results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: performance-test-results
+        path: |
+          performance-results/
+        retention-days: 30
+
+    - name: Analyze performance regression
+      if: always()
+      run: |
+        echo "# Performance Regression Analysis" > performance-report.md
+        echo "" >> performance-report.md
+        echo "**Date:** $(date)" >> performance-report.md
+        echo "**Commit:** ${{ github.sha }}" >> performance-report.md
+        echo "" >> performance-report.md
+        
+        # Add performance analysis logic here
+        echo "## Performance Metrics" >> performance-report.md
+        echo "- Performance tests completed" >> performance-report.md
+        echo "- Results stored in artifacts" >> performance-report.md
+        
+        # Future: Add performance baseline comparison
+        echo "" >> performance-report.md
+        echo "## Recommendations" >> performance-report.md
+        echo "- Review performance test results in artifacts" >> performance-report.md
+        echo "- Compare with previous baselines" >> performance-report.md

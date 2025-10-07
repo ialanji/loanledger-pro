@@ -17,8 +17,14 @@
     "test:client": "jest --selectProjects client",
     "test:server": "jest --selectProjects server",
     "test:e2e": "playwright test",
+    "test:api": "playwright test --config=playwright.api.config.js",
     "test:reports": "node scripts/test-reports-fixes.js",
-    "verify:reports": "node scripts/verify-reports-fixes.js"
+    "verify:reports": "node scripts/verify-reports-fixes.js",
+    "test:regression": "node scripts/run-regression-tests.js",
+    "test:regression:verbose": "node scripts/run-regression-tests.js --verbose",
+    "test:regression:fast": "node scripts/run-regression-tests.js --no-performance",
+    "test:verify": "node tests/verify-fixes.js",
+    "report:process": "node scripts/test-reporter.js"
   },
   "dependencies": {
     "@googleapis/sheets": "^12.0.0",
@@ -68,6 +74,7 @@
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
     "node-cron": "^4.2.1",
+    "node-fetch": "^3.3.2",
     "pg": "^8.16.3",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
@@ -80,6 +87,7 @@
     "sqlite3": "^5.1.7",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
+    "uuid": "^13.0.0",
     "vaul": "^0.9.9",
     "zod": "^3.25.76"
   },

@@ -6,12 +6,31 @@ const { Pool } = pkg;
 import { google } from 'googleapis';
 import { ScheduleEngine } from './src/services/schedule-engine.js';
 import { initializePaymentProcessingJob, setupPaymentProcessingRoutes } from './src/jobs/ProcessDuePaymentsJob.js';
+import { ensureExpensesTable, validateExpenseData, validateDatabaseHealth } from './src/utils/database-schema.js';
+import { withTransaction, handleDatabaseError, ensureResourceExists, sendErrorResponse, asyncHandler, globalErrorHandler, APIError } from './src/utils/error-handling.js';
+import { withRetry, withHealthyConnection, performHealthCheck, getConnectionHealth, healthCheckMiddleware, createFallbackResponse } from './src/utils/connection-manager.js';
+import { logger, requestLogger, dbLogger, perfLogger } from './src/utils/logger.js';
+import { 
+  requestLoggingMiddleware, 
+  createDatabaseQueryLogger, 
+  createConnectionPoolMonitor,
+  errorLoggingMiddleware,
+  performanceMonitoringMiddleware,
+  healthCheckLoggingMiddleware
+} from './src/middleware/request-logging.js';
+import { setupDebugRoutes } from './src/routes/debug-routes.js';
+import { initializeSystemMonitoring, createMonitoringMiddleware, createDatabaseMonitoringWrapper } from './src/utils/monitoring.js';
 import cron from 'node-cron';
 
 dotenv.config();
 
-console.log('[BOOT]', { moduleUrl: import.meta.url, pid: process.pid, node: process.version });
-+console.log('[BOOT PATHS]', { cwd: process.cwd(), argv: process.argv });
+logger.info('Application starting', {
+  moduleUrl: import.meta.url,
+  pid: process.pid,
+  nodeVersion: process.version,
+  cwd: process.cwd(),
+  argv: process.argv
+});
 
 const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://localhost:8091' : '');
 
@@ -19,7 +38,7 @@ const app = express();
 
 // Принудительная инициализация роутера Express через первый маршрут
 app.get('/_init_router', (req, res) => res.status(404).end());
-console.log('[ROUTER INIT] Router initialized via dummy route:', !!app._router);
+logger.debug('Router initialized via dummy route', { hasRouter: !!app._router });
 const port = process.env.PORT || 3001;
 const host = process.env.BIND_HOST || '127.0.0.1';
 
@@ -38,45 +57,12 @@ app.use((req, res, next) => {
   });
 });
 
-// Global request logger for debugging
-app.use((req, res, next) => {
-  res.set('X-Global-Logger', 'active');
-  console.log(`[REQ] ${req.method} ${req.url}`, { headers: req.headers });
-  
-  // Специальная отладка для admin routes
-  if (req.url.startsWith('/api/admin')) {
-    console.log(`[GLOBAL ADMIN DEBUG] URL: ${req.url}, Path: ${req.path}, Method: ${req.method}`);
-    console.log(`[GLOBAL ADMIN DEBUG] About to call next() - should reach admin middleware`);
-  }
-  
-  // Перехватываем res.end, res.send, res.json для отслеживания где завершается запрос
-  const originalEnd = res.end;
-  const originalSend = res.send;
-  const originalJson = res.json;
-  
-  res.end = function(...args) {
-    if (req.url.startsWith('/api/admin')) {
-      console.log(`[GLOBAL DEBUG] Request ${req.url} ended with res.end() - INTERCEPTED!`);
-    }
-    return originalEnd.apply(this, args);
-  };
-  
-  res.send = function(...args) {
-    if (req.url.startsWith('/api/admin')) {
-      console.log(`[GLOBAL DEBUG] Request ${req.url} ended with res.send() - INTERCEPTED!`);
-    }
-    return originalSend.apply(this, args);
-  };
-  
-  res.json = function(...args) {
-    if (req.url.startsWith('/api/admin')) {
-      console.log(`[GLOBAL DEBUG] Request ${req.url} ended with res.json() - INTERCEPTED!`, args[0]);
-    }
-    return originalJson.apply(this, args);
-  };
-  
-  next();
-});
+// Comprehensive request/response logging
+app.use(healthCheckLoggingMiddleware);
+app.use(requestLoggingMiddleware);
+app.use(performanceMonitoringMiddleware);
+
+// Database health check middleware will be added after pool initialization
 
 // Path-specific middleware for /api/payments to verify routing
 app.use('/api/payments', (req, res, next) => {
@@ -188,17 +174,80 @@ if (connectionString) {
   poolConfig = cfg;
 }
 
-const pool = new Pool(poolConfig);
+// Enhanced pool configuration with connection management
+const enhancedPoolConfig = {
+  ...poolConfig,
+  // Connection pool settings
+  max: 20, // Maximum number of clients in the pool
+  min: 2,  // Minimum number of clients in the pool
+  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+  connectionTimeoutMillis: 5000, // Return error after 5 seconds if connection could not be established
+  maxUses: 7500, // Close (and replace) a connection after it has been used 7500 times
+  
+  // Keep alive settings
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+  
+  // Application name for monitoring
+  application_name: 'finance-api-server'
+};
 
-// Test database connection
-pool.connect((err, client, release) => {
-  if (err) {
-    console.error('Error connecting to PostgreSQL:', err);
-  } else {
-    console.log('Connected to PostgreSQL database');
-    release();
+const pool = new Pool(enhancedPoolConfig);
+
+// Add comprehensive database logging
+createDatabaseQueryLogger(pool);
+createConnectionPoolMonitor(pool);
+
+// Initialize system monitoring
+const systemMonitor = initializeSystemMonitoring(pool, {
+  checkInterval: 60000, // 1 minute
+  alertThresholds: {
+    responseTime: 5000, // 5 seconds
+    memoryUsage: 0.85, // 85% of heap
+    errorRate: 0.1, // 10% error rate
+    connectionPoolUsage: 0.8 // 80% of max connections
   }
 });
+
+// Add database monitoring wrapper
+createDatabaseMonitoringWrapper(pool, systemMonitor);
+
+// Add request monitoring for system health tracking (after systemMonitor is initialized)
+app.use(createMonitoringMiddleware(systemMonitor));
+
+logger.info('Database pool initialized', {
+  host: enhancedPoolConfig.host,
+  database: enhancedPoolConfig.database,
+  maxConnections: enhancedPoolConfig.max,
+  minConnections: enhancedPoolConfig.min
+});
+
+// Database health check middleware - now that pool is initialized
+app.use('/api', healthCheckMiddleware(pool));
+
+// Setup debug and monitoring routes
+setupDebugRoutes(app, pool);
+
+// Test database connection with retry logic
+(async () => {
+  try {
+    logger.info('Testing database connection...');
+    const healthResult = await performHealthCheck(pool);
+    
+    if (healthResult.healthy) {
+      logger.info('Database connection successful', {
+        responseTime: healthResult.responseTime,
+        timestamp: healthResult.timestamp
+      });
+    } else {
+      logger.error('Database connection failed', { error: healthResult.error });
+      console.warn('[STARTUP] Server will continue but database operations may fail');
+    }
+  } catch (error) {
+    console.error('[STARTUP] Database connection test failed:', error.message);
+    console.warn('[STARTUP] Server will continue but database operations may fail');
+  }
+})();
 
 // Scheduled jobs
 cron.schedule('0 9 * * *', async () => {
@@ -474,99 +523,427 @@ app.post('/api/expense-import/run', async (req, res) => {
 });
 
 // Get all expenses
-app.get('/api/expenses', async (req, res) => {
-  try {
-    // Создаем таблицу expenses если она не существует
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS expenses (
-        id SERIAL PRIMARY KEY,
-        source VARCHAR(255),
-        date DATE NOT NULL,
-        amount DECIMAL(15,2) NOT NULL,
-        currency VARCHAR(10) DEFAULT 'MDL',
-        department VARCHAR(255),
-        supplier VARCHAR(255),
-        category VARCHAR(255),
-        description TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+app.get('/api/expenses', asyncHandler(async (req, res) => {
+  // Ensure expenses table exists with proper schema
+  await withHealthyConnection(pool, async (client) => {
+    // Table creation is handled by the schema utility
+    return true;
+  }, 'ensure expenses table');
+  
+  await ensureExpensesTable(pool);
     
-    const result = await pool.query('SELECT * FROM expenses ORDER BY date DESC');
+    // Extract and validate query parameters
+    const { category, department, supplier, currency, date_from, date_to, limit, offset, search } = req.query;
+    let query = 'SELECT * FROM expenses';
+    let queryParams = [];
+    let paramIndex = 1;
+    
+    // Build WHERE clause conditions
+    const conditions = [];
+    
+    // Add category filter if provided
+    if (category && category.trim()) {
+      conditions.push(`LOWER(category) = $${paramIndex}`);
+      queryParams.push(category.toLowerCase().trim());
+      paramIndex++;
+    }
+    
+    // Add department filter if provided
+    if (department && department.trim()) {
+      conditions.push(`LOWER(department) = $${paramIndex}`);
+      queryParams.push(department.toLowerCase().trim());
+      paramIndex++;
+    }
+    
+    // Add supplier filter if provided
+    if (supplier && supplier.trim()) {
+      conditions.push(`LOWER(supplier) = $${paramIndex}`);
+      queryParams.push(supplier.toLowerCase().trim());
+      paramIndex++;
+    }
+    
+    // Add currency filter if provided
+    if (currency) {
+      const validCurrencies = ['MDL', 'USD', 'EUR', 'RON'];
+      if (validCurrencies.includes(currency.toUpperCase())) {
+        conditions.push(`UPPER(currency) = $${paramIndex}`);
+        queryParams.push(currency.toUpperCase());
+        paramIndex++;
+      } else {
+        return res.status(400).json({ 
+          error: 'Invalid currency parameter',
+          message: `Currency must be one of: ${validCurrencies.join(', ')}`,
+          provided: currency
+        });
+      }
+    }
+    
+    // Add date range filters if provided
+    if (date_from) {
+      if (isNaN(Date.parse(date_from))) {
+        return res.status(400).json({ 
+          error: 'Invalid date_from parameter',
+          message: 'date_from must be a valid date (YYYY-MM-DD format)',
+          provided: date_from
+        });
+      }
+      conditions.push(`date >= $${paramIndex}`);
+      queryParams.push(date_from);
+      paramIndex++;
+    }
+    
+    if (date_to) {
+      if (isNaN(Date.parse(date_to))) {
+        return res.status(400).json({ 
+          error: 'Invalid date_to parameter',
+          message: 'date_to must be a valid date (YYYY-MM-DD format)',
+          provided: date_to
+        });
+      }
+      conditions.push(`date <= $${paramIndex}`);
+      queryParams.push(date_to);
+      paramIndex++;
+    }
+    
+    // Add search filter if provided
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim().toLowerCase()}%`;
+      conditions.push(`(LOWER(source) LIKE $${paramIndex} OR LOWER(supplier) LIKE $${paramIndex + 1} OR LOWER(category) LIKE $${paramIndex + 2} OR LOWER(description) LIKE $${paramIndex + 3})`);
+      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm);
+      paramIndex += 4;
+    }
+    
+    // Add WHERE clause if there are conditions
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    
+    // Add ORDER BY clause
+    query += ' ORDER BY date DESC, created_at DESC';
+    
+    // Add pagination if provided
+    if (limit) {
+      const limitNum = parseInt(limit);
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 1000) {
+        return res.status(400).json({ 
+          error: 'Invalid limit parameter',
+          message: 'Limit must be a number between 1 and 1000',
+          provided: limit
+        });
+      }
+      query += ` LIMIT $${paramIndex}`;
+      queryParams.push(limitNum);
+      paramIndex++;
+    }
+    
+    if (offset) {
+      const offsetNum = parseInt(offset);
+      if (isNaN(offsetNum) || offsetNum < 0) {
+        return res.status(400).json({ 
+          error: 'Invalid offset parameter',
+          message: 'Offset must be a non-negative number',
+          provided: offset
+        });
+      }
+      query += ` OFFSET $${paramIndex}`;
+      queryParams.push(offsetNum);
+      paramIndex++;
+    }
+    
+    console.log(`[EXPENSES GET] Executing query: ${query} with params:`, queryParams);
+    
+    const result = await withHealthyConnection(pool, async (client) => {
+      return await client.query(query, queryParams);
+    }, 'fetch expenses');
+    
+    console.log(`[EXPENSES GET] Found ${result.rows.length} expenses`, {
+      count: result.rows.length,
+      filters: { category, department, supplier, currency, date_from, date_to, search, limit, offset },
+      timestamp: new Date().toISOString()
+    });
+    
     res.json(result.rows);
-  } catch (error) {
-    console.error('Error fetching expenses:', error);
-    res.status(500).json({ error: 'Internal server error' });
+}));
+
+// Get expense by ID
+app.get('/api/expenses/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  // Validate ID parameter
+  if (!id || isNaN(parseInt(id))) {
+    throw new APIError('Invalid ID parameter', 400, {
+      type: 'invalid_parameter',
+      parameter: 'id',
+      provided: id,
+      expected: 'positive integer'
+    });
   }
-});
+  
+  console.log(`[EXPENSES GET BY ID] Fetching expense with ID: ${id}`);
+  
+  const expense = await withHealthyConnection(pool, async (client) => {
+    return await ensureResourceExists(client, 'expenses', parseInt(id), 'Expense');
+  }, `fetch expense ${id}`);
+  
+  console.log(`[EXPENSES GET BY ID] Found expense:`, {
+    id: expense.id,
+    source: expense.source,
+    amount: expense.amount,
+    currency: expense.currency,
+    date: expense.date
+  });
+  
+  res.json(expense);
+}));
 
 // Create new expense
-app.post('/api/expenses', async (req, res) => {
-  try {
-    const { source, date, amount, currency, department, supplier, category, description } = req.body;
-    
-    const result = await pool.query(
-      `INSERT INTO expenses (source, date, amount, currency, department, supplier, category, description, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-       RETURNING *`,
-      [source, date, amount, currency, department, supplier, category, description]
-    );
-    
-    res.status(201).json(result.rows[0]);
-  } catch (error) {
-    console.error('Error creating expense:', error);
-    res.status(500).json({ error: 'Internal server error' });
+app.post('/api/expenses', asyncHandler(async (req, res) => {
+  console.log('[EXPENSES POST] Request body:', req.body);
+  
+  // Ensure expenses table exists
+  await ensureExpensesTable(pool);
+  
+  // Validate expense data using schema validation
+  const validation = validateExpenseData(req.body);
+  
+  if (!validation.isValid) {
+    console.log('[EXPENSES POST] Validation failed:', validation.errors);
+    throw new APIError('Validation failed', 400, {
+      type: 'validation_error',
+      errors: validation.errors,
+      warnings: validation.warnings,
+      received: req.body
+    });
   }
-});
+  
+  // Log warnings if any
+  if (validation.warnings.length > 0) {
+    console.log('[EXPENSES POST] Validation warnings:', validation.warnings);
+  }
+  
+  const { source, date, amount, currency, department, supplier, category, description } = validation.validatedData;
+  
+  // Use transaction with retry logic for data consistency
+  const createdExpense = await withHealthyConnection(pool, async (poolClient) => {
+    return await withTransaction(pool, async (client) => {
+      const result = await client.query(
+        `INSERT INTO expenses (source, date, amount, currency, department, supplier, category, description, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+         RETURNING *`,
+        [source, date, amount, currency, department, supplier, category, description]
+      );
+      
+      return result.rows[0];
+    }, 'create expense');
+  }, 'create expense with retry');
+  
+  console.log('[EXPENSES POST] Successfully created expense:', {
+    id: createdExpense.id,
+    source: createdExpense.source,
+    amount: createdExpense.amount,
+    currency: createdExpense.currency,
+    date: createdExpense.date,
+    timestamp: new Date().toISOString()
+  });
+  
+  res.status(201).json({
+    ...createdExpense,
+    warnings: validation.warnings.length > 0 ? validation.warnings : undefined
+  });
+}));
 
 // Update expense
-app.put('/api/expenses/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { source, date, amount, currency, department, supplier, category, description } = req.body;
-    
-    const result = await pool.query(
-      `UPDATE expenses 
-       SET source = $1, date = $2, amount = $3, currency = $4, department = $5, 
-           supplier = $6, category = $7, description = $8, updated_at = NOW()
-       WHERE id = $9
-       RETURNING *`,
-      [source, date, amount, currency, department, supplier, category, description, id]
-    );
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Expense not found' });
-    }
-    
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error updating expense:', error);
-    res.status(500).json({ error: 'Internal server error' });
+app.put('/api/expenses/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  // Validate ID parameter
+  if (!id || isNaN(parseInt(id))) {
+    throw new APIError('Invalid ID parameter', 400, {
+      type: 'invalid_parameter',
+      parameter: 'id',
+      provided: id,
+      expected: 'positive integer'
+    });
   }
-});
+  
+  // Ensure expenses table exists
+  await ensureExpensesTable(pool);
+  
+  // Validate expense data using schema validation
+  const validation = validateExpenseData(req.body);
+  
+  if (!validation.isValid) {
+    console.log('[EXPENSES PUT] Validation failed:', validation.errors);
+    throw new APIError('Validation failed', 400, {
+      type: 'validation_error',
+      errors: validation.errors,
+      warnings: validation.warnings,
+      received: req.body
+    });
+  }
+  
+  // Log warnings if any
+  if (validation.warnings.length > 0) {
+    console.log('[EXPENSES PUT] Validation warnings:', validation.warnings);
+  }
+  
+  const { source, date, amount, currency, department, supplier, category, description } = validation.validatedData;
+  
+  console.log(`[EXPENSES PUT] Updating expense ${id} with:`, { source, date, amount, currency, department, supplier, category, description });
+  
+  // Use transaction with retry logic for data consistency
+  const updatedExpense = await withHealthyConnection(pool, async (poolClient) => {
+    return await withTransaction(pool, async (client) => {
+      // First ensure the expense exists
+      await ensureResourceExists(client, 'expenses', parseInt(id), 'Expense');
+      
+      // Then update it
+      const result = await client.query(
+        `UPDATE expenses 
+         SET source = $1, date = $2, amount = $3, currency = $4, department = $5, 
+             supplier = $6, category = $7, description = $8, updated_at = NOW()
+         WHERE id = $9
+         RETURNING *`,
+        [source, date, amount, currency, department, supplier, category, description, parseInt(id)]
+      );
+      
+      return result.rows[0];
+    }, `update expense ${id}`);
+  }, `update expense ${id} with retry`);
+  
+  console.log('[EXPENSES PUT] Successfully updated expense:', {
+    id: updatedExpense.id,
+    source: updatedExpense.source,
+    amount: updatedExpense.amount,
+    currency: updatedExpense.currency,
+    date: updatedExpense.date,
+    timestamp: new Date().toISOString()
+  });
+  
+  res.json({
+    ...updatedExpense,
+    warnings: validation.warnings.length > 0 ? validation.warnings : undefined
+  });
+}));
 
 // Delete expense
-app.delete('/api/expenses/:id', async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    const result = await pool.query('DELETE FROM expenses WHERE id = $1 RETURNING *', [id]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Expense not found' });
-    }
-    
-    res.json({ message: 'Expense deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting expense:', error);
-    res.status(500).json({ error: 'Internal server error' });
+app.delete('/api/expenses/:id', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  // Validate ID parameter
+  if (!id || isNaN(parseInt(id))) {
+    throw new APIError('Invalid ID parameter', 400, {
+      type: 'invalid_parameter',
+      parameter: 'id',
+      provided: id,
+      expected: 'positive integer'
+    });
   }
-});
+  
+  console.log(`[EXPENSES DELETE] Deleting expense with ID: ${id}`);
+  
+  // Use transaction with retry logic for data consistency
+  const deletedExpense = await withHealthyConnection(pool, async (poolClient) => {
+    return await withTransaction(pool, async (client) => {
+      // First ensure the expense exists
+      const existingExpense = await ensureResourceExists(client, 'expenses', parseInt(id), 'Expense');
+      
+      // Then delete it
+      const result = await client.query('DELETE FROM expenses WHERE id = $1 RETURNING *', [parseInt(id)]);
+      
+      return result.rows[0];
+    }, `delete expense ${id}`);
+  }, `delete expense ${id} with retry`);
+  
+  console.log('[EXPENSES DELETE] Successfully deleted expense:', {
+    id: deletedExpense.id,
+    source: deletedExpense.source,
+    amount: deletedExpense.amount,
+    currency: deletedExpense.currency,
+    date: deletedExpense.date,
+    timestamp: new Date().toISOString()
+  });
+  
+  res.json({ 
+    message: 'Expense deleted successfully',
+    deleted: {
+      id: deletedExpense.id,
+      source: deletedExpense.source,
+      amount: deletedExpense.amount,
+      date: deletedExpense.date
+    },
+    timestamp: new Date().toISOString()
+  });
+}));
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Database health check for expenses
+app.get('/api/expenses/health', async (req, res) => {
+  try {
+    const [healthCheck, connectionStats] = await Promise.all([
+      validateDatabaseHealth(pool),
+      Promise.resolve(getConnectionHealth())
+    ]);
+    
+    if (healthCheck.healthy) {
+      res.json({
+        status: 'healthy',
+        message: healthCheck.message,
+        details: healthCheck.details,
+        connectionStats,
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(503).json({
+        status: 'unhealthy',
+        message: healthCheck.message,
+        details: healthCheck.details,
+        connectionStats,
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    console.error('[EXPENSES HEALTH] Health check error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Health check failed',
+      error: error.message,
+      connectionStats: getConnectionHealth(),
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Connection statistics endpoint
+app.get('/api/expenses/connection-stats', (req, res) => {
+  const stats = getConnectionHealth();
+  res.json({
+    ...stats,
+    poolInfo: {
+      totalCount: pool.totalCount,
+      idleCount: pool.idleCount,
+      waitingCount: pool.waitingCount
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Fallback endpoint for when database is unavailable
+app.get('/api/expenses/fallback', (req, res) => {
+  const fallbackResponse = createFallbackResponse('fetch expenses', {
+    message: 'Database is temporarily unavailable',
+    suggestion: 'Please try again in a few moments',
+    alternativeActions: [
+      'Check system status',
+      'Contact support if issue persists'
+    ]
+  });
+  
+  res.status(503).json(fallbackResponse);
 });
 
 // Test endpoint for debugging forecast data
@@ -810,6 +1187,25 @@ app.get('/api/import-logs', async (req, res) => {
 // Expense sources CRUD
 app.get('/api/expense-sources', async (req, res) => {
   try {
+    // Создаем таблицу expense_sources если она не существует
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS expense_sources (
+        id SERIAL PRIMARY KEY,
+        category VARCHAR(255) NOT NULL,
+        sheet_url TEXT NOT NULL,
+        import_mode VARCHAR(50) DEFAULT 'google_sheets',
+        sheet_name VARCHAR(255),
+        range_start VARCHAR(20),
+        range_end VARCHAR(20),
+        column_mapping JSONB DEFAULT '{}',
+        is_active BOOLEAN DEFAULT true,
+        import_settings JSONB DEFAULT '{}',
+        validation_rules JSONB DEFAULT '{}',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     const result = await pool.query('SELECT * FROM expense_sources ORDER BY created_at DESC');
     res.json(result.rows);
   } catch (error) {
@@ -824,6 +1220,25 @@ app.get('/api/expense-sources', async (req, res) => {
 
 app.post('/api/expense-sources', async (req, res) => {
   try {
+    // Создаем таблицу expense_sources если она не существует
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS expense_sources (
+        id SERIAL PRIMARY KEY,
+        category VARCHAR(255) NOT NULL,
+        sheet_url TEXT NOT NULL,
+        import_mode VARCHAR(50) DEFAULT 'google_sheets',
+        sheet_name VARCHAR(255),
+        range_start VARCHAR(20),
+        range_end VARCHAR(20),
+        column_mapping JSONB DEFAULT '{}',
+        is_active BOOLEAN DEFAULT true,
+        import_settings JSONB DEFAULT '{}',
+        validation_rules JSONB DEFAULT '{}',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     const { category, sheet_url, import_mode, sheet_name, range_start, range_end, column_mapping, is_active, import_settings, validation_rules } = req.body;
     const result = await pool.query(
       `INSERT INTO expense_sources (
@@ -985,25 +1400,205 @@ app.get('/api/aliases', async (req, res) => {
       )
     `);
     
-    const result = await pool.query('SELECT * FROM aliases ORDER BY created_at DESC');
+    // Extract and validate query parameters
+    const { type, limit, offset, search } = req.query;
+    let query = 'SELECT * FROM aliases';
+    let queryParams = [];
+    let paramIndex = 1;
+    
+    // Build WHERE clause conditions
+    const conditions = [];
+    
+    // Add type filter if provided
+    if (type) {
+      // Validate type parameter - only allow known types
+      const validTypes = ['department', 'supplier', 'category'];
+      if (validTypes.includes(type.toLowerCase())) {
+        conditions.push(`LOWER(type) = $${paramIndex}`);
+        queryParams.push(type.toLowerCase());
+        paramIndex++;
+      } else {
+        // Invalid type parameter - return 400 Bad Request
+        return res.status(400).json({ 
+          error: 'Invalid type parameter', 
+          message: `Type must be one of: ${validTypes.join(', ')}`,
+          provided: type
+        });
+      }
+    }
+    
+    // Add search filter if provided
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim().toLowerCase()}%`;
+      conditions.push(`(LOWER(source_value) LIKE $${paramIndex} OR LOWER(normalized_value) LIKE $${paramIndex + 1})`);
+      queryParams.push(searchTerm, searchTerm);
+      paramIndex += 2;
+    }
+    
+    // Add WHERE clause if there are conditions
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    
+    // Add ORDER BY clause
+    query += ' ORDER BY created_at DESC';
+    
+    // Add pagination if provided
+    if (limit) {
+      const limitNum = parseInt(limit);
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 1000) {
+        return res.status(400).json({ 
+          error: 'Invalid limit parameter',
+          message: 'Limit must be a number between 1 and 1000',
+          provided: limit
+        });
+      }
+      query += ` LIMIT $${paramIndex}`;
+      queryParams.push(limitNum);
+      paramIndex++;
+    }
+    
+    if (offset) {
+      const offsetNum = parseInt(offset);
+      if (isNaN(offsetNum) || offsetNum < 0) {
+        return res.status(400).json({ 
+          error: 'Invalid offset parameter',
+          message: 'Offset must be a non-negative number',
+          provided: offset
+        });
+      }
+      query += ` OFFSET $${paramIndex}`;
+      queryParams.push(offsetNum);
+      paramIndex++;
+    }
+    
+    console.log(`[ALIASES GET] Executing query: ${query} with params:`, queryParams);
+    
+    const result = await pool.query(query, queryParams);
     const rows = (result.rows || []).map((r) => ({
       ...r,
       is_group: typeof r.is_group === 'boolean' ? r.is_group : r.source_value === r.normalized_value,
     }));
+    
+    console.log(`[ALIASES GET] Found ${rows.length} aliases${type ? ` of type '${type}'` : ''}`, {
+      count: rows.length,
+      filters: { type, search, limit, offset },
+      timestamp: new Date().toISOString()
+    });
     res.json(rows);
   } catch (error) {
-    console.error('Error fetching aliases:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('[ALIASES GET] Database error:', {
+      message: error.message,
+      stack: error.stack,
+      query: query,
+      params: queryParams,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: 'Failed to fetch aliases',
+      timestamp: new Date().toISOString(),
+      requestId: `aliases-get-${Date.now()}`
+    });
+  }
+});
+
+// Get alias by ID
+app.get('/api/aliases/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Validate ID parameter
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({ 
+        error: 'Invalid ID parameter',
+        message: 'ID must be a valid number',
+        provided: id
+      });
+    }
+    
+    console.log(`[ALIASES GET BY ID] Fetching alias with ID: ${id}`);
+    
+    const result = await pool.query('SELECT * FROM aliases WHERE id = $1', [parseInt(id)]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ 
+        error: 'Alias not found',
+        message: `No alias found with ID ${id}`
+      });
+    }
+    
+    const alias = {
+      ...result.rows[0],
+      is_group: typeof result.rows[0].is_group === 'boolean' ? result.rows[0].is_group : result.rows[0].source_value === result.rows[0].normalized_value,
+    };
+    
+    console.log(`[ALIASES GET BY ID] Found alias:`, alias);
+    res.json(alias);
+  } catch (error) {
+    console.error('[ALIASES GET BY ID] Database error:', {
+      message: error.message,
+      stack: error.stack,
+      aliasId: id,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: `Failed to fetch alias with ID ${id}`,
+      timestamp: new Date().toISOString(),
+      requestId: `aliases-get-id-${Date.now()}`
+    });
   }
 });
 
 // Create new alias
 app.post('/api/aliases', async (req, res) => {
   try {
+    console.log('[ALIASES POST] Request body:', req.body);
     const { source_value, normalized_value, type, is_group } = req.body;
+    console.log('[ALIASES POST] Extracted fields:', { source_value, normalized_value, type, is_group });
     
-    if (!source_value || !normalized_value || !type) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    // Validate required fields
+    const missingFields = [];
+    if (!source_value || source_value.trim() === '') missingFields.push('source_value');
+    if (!normalized_value || normalized_value.trim() === '') missingFields.push('normalized_value');
+    if (!type || type.trim() === '') missingFields.push('type');
+    
+    if (missingFields.length > 0) {
+      console.log('[ALIASES POST] Missing required fields validation failed:', missingFields);
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        missing: missingFields,
+        received: { source_value, normalized_value, type, is_group },
+        required: ['source_value', 'normalized_value', 'type']
+      });
+    }
+    
+    // Validate type parameter
+    const validTypes = ['department', 'supplier', 'category'];
+    if (!validTypes.includes(type.toLowerCase())) {
+      return res.status(400).json({ 
+        error: 'Invalid type parameter',
+        message: `Type must be one of: ${validTypes.join(', ')}`,
+        provided: type
+      });
+    }
+    
+    // Validate field lengths
+    if (source_value.length > 255) {
+      return res.status(400).json({ 
+        error: 'Field too long',
+        message: 'source_value must be 255 characters or less',
+        provided: source_value.length
+      });
+    }
+    
+    if (normalized_value.length > 255) {
+      return res.status(400).json({ 
+        error: 'Field too long',
+        message: 'normalized_value must be 255 characters or less',
+        provided: normalized_value.length
+      });
     }
     
     const result = await pool.query(
@@ -1011,10 +1606,28 @@ app.post('/api/aliases', async (req, res) => {
       [source_value, normalized_value, type, is_group || false]
     );
     
-    res.status(201).json(result.rows[0]);
+    const createdAlias = result.rows[0];
+    console.log('[ALIASES POST] Successfully created alias:', {
+      id: createdAlias.id,
+      source_value: createdAlias.source_value,
+      type: createdAlias.type,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.status(201).json(createdAlias);
   } catch (error) {
-    console.error('Error creating alias:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('[ALIASES POST] Database error:', {
+      message: error.message,
+      stack: error.stack,
+      requestBody: req.body,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: 'Failed to create alias',
+      timestamp: new Date().toISOString(),
+      requestId: `aliases-post-${Date.now()}`
+    });
   }
 });
 
@@ -1024,9 +1637,58 @@ app.put('/api/aliases/:id', async (req, res) => {
     const { id } = req.params;
     const { source_value, normalized_value, type, is_group } = req.body;
     
-    if (!source_value || !normalized_value || !type) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    // Validate ID parameter
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({ 
+        error: 'Invalid ID parameter',
+        message: 'ID must be a valid number',
+        provided: id
+      });
     }
+    
+    // Validate required fields
+    const missingFields = [];
+    if (!source_value || source_value.trim() === '') missingFields.push('source_value');
+    if (!normalized_value || normalized_value.trim() === '') missingFields.push('normalized_value');
+    if (!type || type.trim() === '') missingFields.push('type');
+    
+    if (missingFields.length > 0) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        missing: missingFields,
+        received: { source_value, normalized_value, type, is_group },
+        required: ['source_value', 'normalized_value', 'type']
+      });
+    }
+    
+    // Validate type parameter
+    const validTypes = ['department', 'supplier', 'category'];
+    if (!validTypes.includes(type.toLowerCase())) {
+      return res.status(400).json({ 
+        error: 'Invalid type parameter',
+        message: `Type must be one of: ${validTypes.join(', ')}`,
+        provided: type
+      });
+    }
+    
+    // Validate field lengths
+    if (source_value.length > 255) {
+      return res.status(400).json({ 
+        error: 'Field too long',
+        message: 'source_value must be 255 characters or less',
+        provided: source_value.length
+      });
+    }
+    
+    if (normalized_value.length > 255) {
+      return res.status(400).json({ 
+        error: 'Field too long',
+        message: 'normalized_value must be 255 characters or less',
+        provided: normalized_value.length
+      });
+    }
+    
+    console.log(`[ALIASES PUT] Updating alias ${id} with:`, { source_value, normalized_value, type, is_group });
     
     const result = await pool.query(
       'UPDATE aliases SET source_value = $1, normalized_value = $2, type = $3, is_group = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $5 RETURNING *',
@@ -1034,13 +1696,37 @@ app.put('/api/aliases/:id', async (req, res) => {
     );
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Alias not found' });
+      console.log(`[ALIASES PUT] Alias not found for update: ID ${id}`);
+      return res.status(404).json({ 
+        error: 'Alias not found',
+        message: `No alias found with ID ${id}`,
+        timestamp: new Date().toISOString()
+      });
     }
     
-    res.json(result.rows[0]);
+    const updatedAlias = result.rows[0];
+    console.log('[ALIASES PUT] Successfully updated alias:', {
+      id: updatedAlias.id,
+      source_value: updatedAlias.source_value,
+      type: updatedAlias.type,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.json(updatedAlias);
   } catch (error) {
-    console.error('Error updating alias:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('[ALIASES PUT] Database error:', {
+      message: error.message,
+      stack: error.stack,
+      aliasId: id,
+      requestBody: req.body,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: `Failed to update alias with ID ${id}`,
+      timestamp: new Date().toISOString(),
+      requestId: `aliases-put-${Date.now()}`
+    });
   }
 });
 
@@ -1049,16 +1735,57 @@ app.delete('/api/aliases/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
+    // Validate ID parameter
+    if (!id || isNaN(parseInt(id))) {
+      return res.status(400).json({ 
+        error: 'Invalid ID parameter',
+        message: 'ID must be a valid number',
+        provided: id
+      });
+    }
+    
+    console.log(`[ALIASES DELETE] Deleting alias with ID: ${id}`);
+    
     const result = await pool.query('DELETE FROM aliases WHERE id = $1 RETURNING *', [id]);
     
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Alias not found' });
+      console.log(`[ALIASES DELETE] Alias not found for deletion: ID ${id}`);
+      return res.status(404).json({ 
+        error: 'Alias not found',
+        message: `No alias found with ID ${id}`,
+        timestamp: new Date().toISOString()
+      });
     }
     
-    res.json({ message: 'Alias deleted successfully' });
+    const deletedAlias = result.rows[0];
+    console.log('[ALIASES DELETE] Successfully deleted alias:', {
+      id: deletedAlias.id,
+      source_value: deletedAlias.source_value,
+      type: deletedAlias.type,
+      timestamp: new Date().toISOString()
+    });
+    
+    res.json({ 
+      message: 'Alias deleted successfully',
+      deleted: {
+        id: deletedAlias.id,
+        source_value: deletedAlias.source_value
+      },
+      timestamp: new Date().toISOString()
+    });
   } catch (error) {
-    console.error('Error deleting alias:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('[ALIASES DELETE] Database error:', {
+      message: error.message,
+      stack: error.stack,
+      aliasId: id,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: `Failed to delete alias with ID ${id}`,
+      timestamp: new Date().toISOString(),
+      requestId: `aliases-delete-${Date.now()}`
+    });
   }
 });
 
@@ -3730,12 +4457,23 @@ app.use((req, res) => {
   }
 });
 
+// Error logging middleware (before global error handler)
+app.use(errorLoggingMiddleware);
+
+// Global error handler (must be last middleware)
+app.use(globalErrorHandler);
+
 app.listen(port, host, () => {
-  console.log(`Server running on port ${port}`);
+  logger.info('Server started successfully', {
+    port,
+    host,
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString()
+  });
   
   // Инициализируем фоновую задачу для автоматической оплаты платежей
   initializePaymentProcessingJob(pool);
-  console.log('[ProcessDuePaymentsJob] Initialized and scheduled to run daily at 08:00');
+  logger.info('ProcessDuePaymentsJob initialized and scheduled to run daily at 08:00');
   
   // Self-probe /api/version to validate reachability and headers
   setTimeout(() => {
